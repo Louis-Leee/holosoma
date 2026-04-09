@@ -218,6 +218,64 @@ For OmniRetarget data downloaded from HuggingFace, please add `--use_omniretarge
 python data_conversion/convert_data_format_mj.py --input_file OmniRetarget/robot-object/sub3_largebox_003_original.npz --output_fps 50 --output_name converted_res/object_interaction/sub3_largebox_003_mj_w_obj_omnirt.npz --data_format smplh --object_name "largebox" --has_dynamic_object --use_omniretarget_data --once
 ```
 
+### HuMI Data (LeRobot Format)
+
+HuMI datasets from HuggingFace already contain IK-solved G1-29DOF joint positions and don't need retargeting. Use the conversion script to convert them to the same NPZ format as the retargeting output.
+
+#### Step 1: Download HuMI Data
+
+```bash
+# Example: download HuMI-Proposal from HuggingFace
+python -c "
+from huggingface_hub import snapshot_download
+snapshot_download(repo_id='Richard-Nai/HuMI-Proposal', repo_type='dataset', local_dir='data/humi/HuMI-Proposal')
+"
+```
+
+Available datasets: `HuMI-Proposal`, `HuMI-Walk-Clean-Table`, `HuMI-Toss`, `HuMI-Unsheathe`
+
+#### Step 2: Convert to Retarget Format
+
+```bash
+# Convert a single HuMI dataset
+python data_conversion/convert_humi_to_retarget_format.py \
+    --humi-dir ../../../../data/humi/HuMI-Proposal \
+    --save-dir demo_results/g1/robot_only/humi
+
+# Convert all HuMI datasets
+for ds in Proposal Walk-Clean-Table Toss Unsheathe; do
+    python data_conversion/convert_humi_to_retarget_format.py \
+        --humi-dir ../../../../data/humi/HuMI-${ds} \
+        --save-dir demo_results/g1/robot_only/humi
+done
+```
+
+This produces per-episode NPZ files (e.g., `proposal_ep000.npz`) with the same `qpos` format as retargeting output.
+
+#### Step 3: Visualize HuMI Results
+
+```bash
+# Visualize a single episode
+python viser_player.py --robot-urdf models/g1/g1_29dof.urdf \
+    --qpos-npz demo_results/g1/robot_only/humi/proposal_ep000.npz \
+    --no-assume-object-in-qpos --loop
+
+# Visualize walk-clean-table
+python viser_player.py --robot-urdf models/g1/g1_29dof.urdf \
+    --qpos-npz demo_results/g1/robot_only/humi/walk_clean_table_ep000.npz \
+    --no-assume-object-in-qpos --loop
+```
+
+#### Step 4: Convert for RL Training
+
+```bash
+python data_conversion/convert_data_format_mj.py \
+    --input_file demo_results/g1/robot_only/humi/proposal_ep000.npz \
+    --output_fps 50 \
+    --output_name converted_res/robot_only/proposal_ep000_mj_fps50.npz \
+    --data_format lafan --object_name "ground" --once
+```
+
 ## Custom Human Motion Data Format
 Please see the instructions for custom human motion data formats: [ADD_MOTION_FORMAT_README.md](ADD_MOTION_FORMAT_README.md)
 
