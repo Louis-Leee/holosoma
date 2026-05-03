@@ -191,10 +191,65 @@ g1_29dof_wbt_fast_sac_w_object = replace(
     ),
 )
 
+########################################################################################################################
+# WBT wrist-force experiment (v10)
+########################################################################################################################
+# Extends ``g1_29dof_wbt`` with the force-aware env class, command /
+# observation / reward presets, and a wider MLP ([1024, 512, 256]) to
+# accommodate the 10x larger obs (actor 1620 vs baseline 154).
+
+# Baseline algo is PPO; typing stored as Union[PPOAlgoConfig, FastSACAlgoConfig]
+# on ExperimentConfig means each `replace` chain trips mypy union-attr even
+# though the runtime type is known. The casts below tell mypy the runtime
+# shape; they are safe because g1_29dof_wbt always uses PPO.
+from typing import cast as _cast  # noqa: E402
+
+from holosoma.config_types.algo import PPOAlgoConfig as _PPOAlgoConfig  # noqa: E402
+
+_baseline_algo: _PPOAlgoConfig = _cast("_PPOAlgoConfig", g1_29dof_wbt.algo)
+_baseline_algo_config = _baseline_algo.config
+
+g1_29dof_wbt_force = replace(
+    g1_29dof_wbt,
+    env_class="holosoma.envs.wbt.wbt_force_injected.WholeBodyTrackingForceInjected",
+    training=replace(
+        g1_29dof_wbt.training,
+        name="g1_29dof_wbt_force_manager",
+    ),
+    command=command.g1_29dof_wbt_force_command,
+    observation=observation.g1_29dof_wbt_force_observation,
+    reward=reward.g1_29dof_wbt_force_reward,
+    algo=replace(
+        _baseline_algo,
+        config=replace(
+            _baseline_algo_config,
+            module_dict=replace(
+                _baseline_algo_config.module_dict,
+                actor=replace(
+                    _baseline_algo_config.module_dict.actor,
+                    layer_config=replace(
+                        _baseline_algo_config.module_dict.actor.layer_config,
+                        hidden_dims=[1024, 512, 256],
+                    ),
+                ),
+                critic=replace(
+                    _baseline_algo_config.module_dict.critic,
+                    layer_config=replace(
+                        _baseline_algo_config.module_dict.critic.layer_config,
+                        hidden_dims=[1024, 512, 256],
+                    ),
+                ),
+            ),
+        ),
+    ),
+)
+
+
 __all__ = [
     "g1_29dof_wbt",
     "g1_29dof_wbt_fast_sac",
     "g1_29dof_wbt_fast_sac_w_object",
+    "g1_29dof_wbt_force",
     "g1_29dof_wbt_w_object",
 ]
 
