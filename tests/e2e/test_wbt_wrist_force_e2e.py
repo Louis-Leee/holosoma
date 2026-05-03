@@ -51,6 +51,7 @@ def _make_forced_experiment(num_envs: int = 2):
             params={"wrist_compliance_config": forced_wrist_cfg},
         )
 
+    assert cfg.command is not None  # preset is g1_29dof_wbt_force_command
     new_cmd = dataclasses.replace(
         cfg.command,
         setup_terms={
