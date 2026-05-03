@@ -1,0 +1,6 @@
+[submodule "third_party/gentle-humanoid-training"]
+	path = third_party/gentle-humanoid-training
+	url = https://github.com/Axellwppr/gentle-humanoid-training.git
+[submodule "third_party/UniFP"]
+	path = third_party/UniFP
+	url = https://github.com/unified-force/UniFP.git
