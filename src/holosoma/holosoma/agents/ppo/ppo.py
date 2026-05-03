@@ -728,6 +728,11 @@ class PPO(BaseAlgo):
         # Extract URDF text from the robot config
         urdf_file_path, urdf_str = get_urdf_text_from_robot_config(self.env.robot_config)
 
+        # Observation schema fields (Task 13.5) — inference-side strict
+        # compare reads these to detect train/infer obs drift.
+        obs_cfg = self.env.observation_manager.cfg
+        actor_obs_cfg = obs_cfg.groups["actor_obs"]
+
         metadata = {
             "dof_names": self.env.robot_config.dof_names,
             "kp": kp_list,
@@ -736,6 +741,9 @@ class PPO(BaseAlgo):
             "command_ranges": cmd_ranges,
             "robot_urdf": urdf_str,
             "robot_urdf_path": urdf_file_path,
+            "history_length": actor_obs_cfg.history_length,
+            "obs_term_names_sorted": sorted(actor_obs_cfg.terms.keys()),
+            "obs_group_dims": dict(self.algo_obs_dim_dict),
         }
         metadata.update(self._checkpoint_metadata(iteration=self.current_learning_iteration))
 
