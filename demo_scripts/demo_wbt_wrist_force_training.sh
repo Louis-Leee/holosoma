@@ -16,7 +16,9 @@
 #   SIMULATOR=mjwarp bash demo_scripts/demo_wbt_wrist_force_training.sh
 #
 # Overridable env vars:
-#   SIMULATOR           (default: isaacgym)   one of {isaacgym, isaacsim, mjwarp}
+#   SIMULATOR           (default: isaacsim)   one of {isaacgym, isaacsim, mjwarp}
+#                       WBT presets bind simulator.isaacsim at construction,
+#                       so `isaacsim` matches the reference demo_omomo script.
 #   LOGGER              (default: wandb)      disable with LOGGER=stdout
 #   SEED                (default: 1)
 #   MOTION_FILE         (default: preset's baseline)
@@ -61,7 +63,7 @@ case "${OS}" in
         ;;
 esac
 
-SIMULATOR="${SIMULATOR:-isaacgym}"
+SIMULATOR="${SIMULATOR:-isaacsim}"
 LOGGER="${LOGGER:-wandb}"
 SEED="${SEED:-1}"
 SKIP_REINSTALL="${SKIP_REINSTALL:-0}"

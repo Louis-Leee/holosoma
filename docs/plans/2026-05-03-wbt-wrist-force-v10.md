@@ -418,10 +418,11 @@ F_ext 以 world frame 进 `WristComplianceCommand`，env 子类 override `_apply
     ```bash
     python src/holosoma/holosoma/train_agent.py \
         exp:g1-29dof-wbt-force \
-        simulator:isaacgym \
+        simulator:isaacsim \
         logger:wandb \
         --training.seed 1
     ```
+    注：WBT 系列 preset 在 `config_values/wbt/g1/experiment.py` 里默认绑定 `simulator.isaacsim`，所以 `simulator:isaacsim` 和省略该 flag 等价（参考 `demo_scripts/demo_omomo_wb_tracking.sh` 的做法）。也可以改用 `simulator:mjwarp` 跑 GPU MuJoCo warp；`simulator:isaacgym` 需要额外装 IsaacGym 才能跑。
   - **wandb 必看指标（Phase 4.5 的 Task 9.5 产物）**——以下**同时满足**才算 gate 过：
     1. `Train/mean_reward` 前 200 iter 单调上升 → 稳定在正区间（不崩）
     2. `Episode/rew_wrist_force_position_tracking_exp` 随训练上升到 **≥ 0.4**（reward 定义是 `exp(-error/σ²)`，0.4 对应稳态 wrist 位置跟踪误差 ~σ=0.3m 的一半）
