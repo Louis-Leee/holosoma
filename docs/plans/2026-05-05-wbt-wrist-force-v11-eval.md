@@ -61,7 +61,10 @@
   - 档 1：`active_frac_cmd` 稳态 ∈ `[0.2, 0.5]`，`active_frac_ext` ≈ 0
   - 档 2：`active_frac_cmd` ≈ 0，`active_frac_ext` 稳态 ∈ `[0.2, 0.5]`
   - 档 3：两路都稳态 ∈ `[0.2, 0.5]`（和训练一致）
-- `Env/force/applied_f_body_{l,r}` == `Env/force/ext_magnitude_{l,r}`（world→body quat 转换对了；只在 `enable_force_ext=True` 的档 2 / 档 3 下有意义）
+- `Env/force/applied_f_body_{l,r}` ≈ `Env/force/ext_magnitude_{l,r}`（**watch-only smoke，不是 gate**）：
+  - 注意这条**当前实际上是同义反复** —— `wbt_force_injected.py:95-96` 把 `force_ext_w[:, 0/1]` 直接 clone 进 `last_applied_force_w_by_body_id`，**没**经过 world→body 旋转，所以 `applied_f_body_*` 的 norm 就是 `ext_magnitude_*` 的 norm，两者**数值上必然相等**。
+  - 这条仅能证明 "world F_ext 被挪进了 buffer"；**不能**证明 `_rotate_force_world_to_body` / `set_external_force_and_torque` 的 frame convention 对（norm 对旋转不变，quaternion 错 / 左右手互换 / body_quat index 错都能过）。
+  - 路径 A 决定：S0 **不**动 code 修这条，只在 plan 留 caveat；operator dogfood 档 2/档 3 时靠肉眼看 "wrist 被推方向 vs 绿 F_ext 箭头方向" 是否一致（§8 frame sanity 缺口）。如果肉眼看到方向不符，升级到 backlog S1（paired cancellation，间接证 frame 正确）或给这个 buffer 改成真的 body-frame + vector-level 断言。
 
 ---
 
@@ -116,16 +119,105 @@ class ForceEvalConfig:
 **结构 mirror `eval_agent.py`**（入口函数签名、tyro 多 `return_unknown_args=True` 链、`run_eval_with_tyro` 调用）。差别只三处：
 
 1. **CLI schema**：在 `main()` 里多解析一层 `ForceEvalConfig`（和 `CheckpointConfig` / `EvalCallbacksConfig` 同级，`return_unknown_args=True` 串联）
-2. **ckpt 兼容性检查**（在 `setup_simulation_environment` 之前）：
+2. **ckpt 兼容性检查**（在 `setup_simulation_environment` 之前，**结构性合约**，不只是看 key 存在）：
    ```python
-   saved_cmd_setup = saved_cfg.command.setup_terms  # dict[str, CommandTermCfg]
-   if "wrist_compliance_command" not in saved_cmd_setup:
-       raise RuntimeError(
-           f"Checkpoint is not force-aware (command.setup_terms has no "
-           f"'wrist_compliance_command' key). Use eval_agent.py for baseline "
-           f"WBT ckpts instead."
-       )
+   from holosoma.config_types.command import WristComplianceConfig
+   from holosoma.managers.command.terms.wbt_force import WristComplianceCommand
+
+   # env_class values in the codebase use dot-separators
+   # (e.g. "holosoma.envs.wbt.wbt_force_injected.WholeBodyTrackingForceInjected"),
+   # but the .endswith("WholeBodyTrackingForceInjected") guard in (d) works either way.
+   FORCE_AWARE_ENV_CLASS = (
+       "holosoma.envs.wbt.wbt_force_injected.WholeBodyTrackingForceInjected"
+   )
+
+   def _resolve_command_func(func_str: str):
+       """Mirror ``managers/command/manager.py:_resolve_function`` — CommandTermCfg.func
+       uses ``"module.path:ClassName"`` (colon), which ``utils.helpers.get_class`` does
+       not accept. Keep this local so we don't reach into the command manager."""
+       module_path, _, attr = func_str.partition(":")
+       import importlib
+       return getattr(importlib.import_module(module_path), attr)
+
+   def _assert_force_aware_ckpt(saved_cfg) -> None:
+       """Raise RuntimeError with a single actionable message if saved_cfg
+       is not a force-aware WBT checkpoint. Checks the whole contract
+       (not just that one key exists), to catch:
+         - partial registration (term in setup_terms but not reset/step)
+         - stale ``func`` pointing to a different class
+         - missing / wrong params type
+         - wrong env class
+         - actor obs missing ``wrist_force_command``
+       """
+       cmd = saved_cfg.command
+       if cmd is None:
+           raise RuntimeError(
+               "Checkpoint command config is None. Expected a force-aware WBT "
+               "config with a `wrist_compliance_command` term. Use eval_agent.py "
+               "for baseline WBT ckpts."
+           )
+
+       # (a) The term must be registered in all three lifecycle buckets.
+       for bucket_name in ("setup_terms", "reset_terms", "step_terms"):
+           bucket = getattr(cmd, bucket_name)
+           if "wrist_compliance_command" not in bucket:
+               raise RuntimeError(
+                   f"Checkpoint is not force-aware: command.{bucket_name} "
+                   f"has no 'wrist_compliance_command' key. Use eval_agent.py "
+                   f"for baseline WBT ckpts."
+               )
+
+       # (b) func must resolve to WristComplianceCommand exactly.
+       setup_term = cmd.setup_terms["wrist_compliance_command"]
+       try:
+           resolved = _resolve_command_func(setup_term.func)
+       except Exception as exc:  # noqa: BLE001
+           raise RuntimeError(
+               f"wrist_compliance_command.func ({setup_term.func!r}) does not "
+               f"resolve: {exc}"
+           ) from exc
+       if resolved is not WristComplianceCommand:
+           raise RuntimeError(
+               f"wrist_compliance_command.func resolves to {resolved.__name__}, "
+               f"expected WristComplianceCommand."
+           )
+
+       # (c) params must carry a WristComplianceConfig.
+       params = setup_term.params or {}
+       wcfg = params.get("wrist_compliance_config")
+       if not isinstance(wcfg, WristComplianceConfig):
+           raise RuntimeError(
+               "wrist_compliance_command.params['wrist_compliance_config'] is "
+               f"{type(wcfg).__name__}, expected WristComplianceConfig."
+           )
+
+       # (d) env class must be force-injected. `env_class` is a top-level field
+       # on ExperimentConfig — there is no `.experiment` wrapper.
+       env_class = saved_cfg.env_class
+       if not env_class.endswith("WholeBodyTrackingForceInjected"):
+           raise RuntimeError(
+               f"Checkpoint env_class is {env_class!r}, expected "
+               f"{FORCE_AWARE_ENV_CLASS!r} (or a subclass). Is this really a "
+               f"g1-29dof-wbt-force ckpt?"
+           )
+
+       # (e) actor obs must include wrist_force_command. `observation.groups`
+       # is a ``dict[str, ObsGroupCfg]`` (see config_types/observation.py:48-56),
+       # not a dataclass with a named ``actor_obs`` field.
+       if saved_cfg.observation is None:
+           raise RuntimeError("Checkpoint observation config is None.")
+       actor_group = saved_cfg.observation.groups.get("actor_obs")
+       if actor_group is None or "wrist_force_command" not in actor_group.terms:
+           raise RuntimeError(
+               "Checkpoint actor_obs has no 'wrist_force_command' term. Policy "
+               "cannot be force-aware without this obs. Check training config."
+           )
+
+   _assert_force_aware_ckpt(saved_cfg)
    ```
+   一次调用覆盖 5 条合约，错一条就 raise 一条可操作的 error；不要只看 key 名。
+
+   **Spec→code 差异（2026-05-05 实现时修正）**：早版 plan 用 `saved_cfg.experiment.env_class` 和 `saved_cfg.observation.groups.actor_obs.terms`，都不对 —— `ExperimentConfig` 本身就是 top-level（没有 `.experiment` wrapper），`groups` 是 `dict[str, ObsGroupCfg]`（不是 dataclass）。另外 `CommandTermCfg.func` 用冒号分隔，必须走本地 `_resolve_command_func`，`utils.helpers.get_class` 只吃点号会挂。
 3. **按 flag 选择性清零 force config**（在 `setup_simulation_environment` 之前对 `tyro_config` 做 `replace`）：
    ```python
    from dataclasses import replace
@@ -172,14 +264,25 @@ class ForceEvalConfig:
 
 ### 5.3 新文件 3：`tests/eval/test_eval_agent_force_cli.py`
 
-Pure CPU，subprocess 起 `--help`，不真起 sim。覆盖 **6 个 case**（flag 拆分后多了 3 个组合 case）：
+Pure CPU，subprocess 起 `--help`，不真起 sim。覆盖 **11 个 case**（flag 拆分 + 结构性 preflight 合约）：
 
+**CLI + config rewrite（6 case）**：
 1. **`--help` smoke**：subprocess 跑 `python src/holosoma/holosoma/eval_agent_force.py --help`，exit 0，stdout 同时含 `enable-force-cmd` **和** `enable-force-ext`（两个 flag 都注册成功）
-2. **不兼容 ckpt 提前 raise**：mock `load_saved_experiment_config` 返回一个 `command.setup_terms` 不含 `wrist_compliance_command` 的 saved config → 调 `main()` 断言 `RuntimeError` 带相应 message
-3. **档 0（`cmd=False, ext=False`）全部清零**：直接调 `_rewrite_wrist_compliance_cfg` on 一个 synthetic `ExperimentConfig`；断言**三个 bucket**（setup / reset / step）里的 `wrist_compliance_config` 满足：`force_cmd_magnitude_range == (0.0, 0.0)` AND `force_cmd_activation_prob_per_step == 0.0` AND `force_ext_magnitude_range == (0.0, 0.0)` AND `force_ext_activation_prob_per_step == 0.0`
-4. **档 1（`cmd=True, ext=False`）只清零 F_ext**：三个 bucket 里 `force_cmd_*` 保持训练默认值（`(5.0, 30.0)` / `0.01`），`force_ext_*` 全零
-5. **档 2（`cmd=False, ext=True`）只清零 F_cmd**：三个 bucket 里 `force_ext_*` 保持训练默认值，`force_cmd_*` 全零
-6. **档 3（`cmd=True, ext=True`）不触发 rewrite**：断言 `_rewrite_wrist_compliance_cfg` 根本没被调（配置对象 identity 不变，用 `is` 比较）—— 这条同时 cover "默认值 = 档 3 = 不动 config"的合理性
+2. **档 0（`cmd=False, ext=False`）全部清零**：直接调 `_rewrite_wrist_compliance_cfg` on 一个 synthetic `ExperimentConfig`；断言**三个 bucket**（setup / reset / step）里的 `wrist_compliance_config` 满足：`force_cmd_magnitude_range == (0.0, 0.0)` AND `force_cmd_activation_prob_per_step == 0.0` AND `force_ext_magnitude_range == (0.0, 0.0)` AND `force_ext_activation_prob_per_step == 0.0`
+3. **档 1（`cmd=True, ext=False`）只清零 F_ext**：三个 bucket 里 `force_cmd_*` 保持训练默认值（`(5.0, 30.0)` / `0.01`），`force_ext_*` 全零
+4. **档 2（`cmd=False, ext=True`）只清零 F_cmd**：三个 bucket 里 `force_ext_*` 保持训练默认值，`force_cmd_*` 全零
+5. **档 3（`cmd=True, ext=True`）不触发 rewrite**：断言 `_rewrite_wrist_compliance_cfg` 根本没被调（配置对象 identity 不变，用 `is` 比较）—— 这条同时 cover "默认值 = 档 3 = 不动 config"的合理性
+6. **`_rewrite_wrist_compliance_cfg` immutability**：断言原 `saved_cfg` 不被 mutate —— `replace` 应该返回新对象，原对象 identity 不变
+
+**Preflight 结构性合约（5 case，对应 §5.2 `_assert_force_aware_ckpt` 的 5 条断言）**：
+
+7. **(a) command=None**：`saved_cfg.command = None` → `RuntimeError` message 含 "command config is None"
+8. **(a') bucket 缺失**：`setup_terms` 里有 `wrist_compliance_command` 但 `reset_terms` 或 `step_terms` 缺 → raise 带"has no 'wrist_compliance_command' key"（参数化 3 种缺失组合）
+9. **(b) func 解析错**：`setup_term.func = "holosoma.envs.wbt.wbt_manager:WholeBodyTrackingManager"`（不是 `WristComplianceCommand`）→ raise 带"resolves to WholeBodyTrackingManager"
+10. **(c) params 类型错**：`params["wrist_compliance_config"] = {"force_cmd_magnitude_range": (5,30)}`（dict 不是 `WristComplianceConfig`）→ raise 带"is dict, expected WristComplianceConfig"
+11. **(d) env_class 错 + (e) actor obs 缺失**：一个 fixture `env_class = "holosoma.envs.wbt.wbt_manager:WholeBodyTrackingManager"`（baseline）→ raise；另一个 fixture env_class 对但 `actor_obs.terms` 不含 `wrist_force_command` → raise 带"Policy cannot be force-aware"
+
+所有 preflight test 用小 fixture `make_force_aware_exp_config(overrides)` 构造，只改要测的字段，其他默认值从 `ExperimentConfig` 的 dataclass default 来。避免每个测试手写 full config。
 
 ### 5.4 修改 1：`src/holosoma/README.md`（append-only，不动现有段落）
 
@@ -245,9 +348,9 @@ Sanity checks to eyeball during rollout:
 
 | 路径 | 作用 | 预估 LoC |
 |---|---|---|
-| `src/holosoma/holosoma/config_types/eval_force.py` | `ForceEvalConfig` frozen dataclass（1 个字段） | ~25 |
-| `src/holosoma/holosoma/eval_agent_force.py` | CLI 入口：mirror `eval_agent.py` + 解析 `ForceEvalConfig` + 兼容性 assert + `replace`-rewrite | ~100 |
-| `tests/eval/test_eval_agent_force_cli.py` | 3 个 pure-CPU test | ~120 |
+| `src/holosoma/holosoma/config_types/eval_force.py` | `ForceEvalConfig` frozen dataclass（2 个字段：`enable_force_cmd` + `enable_force_ext`） | ~35 |
+| `src/holosoma/holosoma/eval_agent_force.py` | CLI 入口：mirror `eval_agent.py` + 解析 `ForceEvalConfig` + 结构性 preflight（5 条合约）+ `replace`-rewrite（两 flag 独立清零）| ~170 |
+| `tests/eval/test_eval_agent_force_cli.py` | 11 个 pure-CPU test（6 CLI/rewrite + 5 preflight）| ~280 |
 
 ### 6.2 修改（append-only）
 
@@ -266,7 +369,11 @@ Sanity checks to eyeball during rollout:
 
 ## 7. 运行命令（dogfood）
 
-主仓 `feat/wbt-wrist-force-v10` 分支上已经有 hardlink 过来的 force-aware ckpt（`logs/WholeBodyTracking/20260504_*_g1_29dof_wbt_force_manager-locomotion/model_*.pt`），**推荐按 4 档递进**跑（每次关一个 viewer 再开下一个；或用 4 个 Terminal 并排看，但要注意 IsaacSim 多实例 GPU 占用）：
+主仓 `feat/wbt-wrist-force-v10` 分支上已经有 hardlink 过来的 force-aware ckpt（`logs/WholeBodyTracking/20260504_*_g1_29dof_wbt_force_manager-locomotion/model_*.pt`），**推荐按 4 档递进**跑（每次关一个 viewer 再开下一个；或用 4 个 Terminal 并排看，但要注意 IsaacSim 多实例 GPU 占用）。
+
+**步数约定**：对齐原 `eval_agent.py` 的行为 —— 默认 `--training.max-eval-steps` 不设置（`None`），`evaluate_policy` 内部是 `itertools.islice(count(), None)` = **无限循环**，由 operator Ctrl+C 停。这是 holosoma eval 的系统约定，S0 不额外约束。operator 自己判断看够了就停。
+
+**bool flag 语法**：两个 flag 默认都是 `True`，用 tyro 的 `--no-<name>` 前缀来禁用（空格分隔 `--enable-force-cmd False` 会被 tyro 认成子命令 positional，**不可用**）。
 
 ```bash
 source scripts/source_isaacsim_setup.sh
@@ -275,17 +382,17 @@ CKPT=logs/WholeBodyTracking/20260504_172258-g1_29dof_wbt_force_manager-locomotio
 # 档 0 — baseline-like（两路都关，验证无 force 下不退化）
 python src/holosoma/holosoma/eval_agent_force.py \
     --checkpoint "$CKPT" \
-    --enable-force-cmd False --enable-force-ext False
+    --no-enable-force-cmd --no-enable-force-ext
 
 # 档 1 — 只 F_cmd（policy 读 obs 响应，sim 物理层不被推）
 python src/holosoma/holosoma/eval_agent_force.py \
     --checkpoint "$CKPT" \
-    --enable-force-cmd True --enable-force-ext False
+    --no-enable-force-ext
 
 # 档 2 — 只 F_ext（sim 推 wrist，policy 看不到 F_cmd obs）
 python src/holosoma/holosoma/eval_agent_force.py \
     --checkpoint "$CKPT" \
-    --enable-force-cmd False --enable-force-ext True
+    --no-enable-force-cmd
 
 # 档 3 — 完整（训练同款；两个 flag 都是默认 True，可省略）
 python src/holosoma/holosoma/eval_agent_force.py \
@@ -337,12 +444,18 @@ python src/holosoma/holosoma/eval_agent_force.py \
 
 4 档 rollout 全部满足：
 
-- **通用**（所有档）：跑满 `max_eval_steps`，不 crash、不 NaN；G1 跟 motion
+- **通用**（所有档）：跑到 operator 主动 Ctrl+C 停为止（默认 unlimited loop），不 crash、不 NaN；G1 跟 motion
 - **档 0**（`cmd=F, ext=F`）：motion reward 不塌；行为等同 baseline WBT；`Env/force/active_frac_{cmd,ext}` ≈ 0；IsaacSim viewer 里**橙 / 绿 两种箭头都不画**（§7.1）
 - **档 1**（`cmd=T, ext=F`）：肉眼看到 wrist 对 F_cmd 有响应；`active_frac_cmd` 稳态 ∈ [0.2, 0.5]，`active_frac_ext` ≈ 0；IsaacSim viewer 里**橙色 F_cmd 箭头随机出现**，**绿色 F_ext 箭头不出现**
-- **档 2**（`cmd=F, ext=T`）：sim 物理层看到 wrist 被推，policy 仍能站住 + 尽量回 motion；`active_frac_cmd` ≈ 0，`active_frac_ext` 稳态 ∈ [0.2, 0.5]；`applied_f_body_{l,r} == ext_magnitude_{l,r}`；IsaacSim viewer 里**绿色 F_ext 箭头随机出现**，**橙色 F_cmd 箭头不出现**
-- **档 3**（`cmd=T, ext=T`）：和训练末期行为最接近；`Episode/rew_wrist_force_position_tracking_exp ≥ 0.4`；两路 active_frac 都在 [0.2, 0.5]；`applied_f_body == ext_magnitude`；IsaacSim viewer 里**橙 / 绿 两种箭头都出现**
-- **异常兼容**：baseline ckpt（`g1_29dof_wbt`）丢进来 → 立即 raise 明确错误，不进 sim
+- **档 2**（`cmd=F, ext=T`）：sim 物理层看到 wrist 被推，policy 仍能站住 + 尽量回 motion；`active_frac_cmd` ≈ 0，`active_frac_ext` 稳态 ∈ [0.2, 0.5]；`applied_f_body_{l,r}` ≈ `ext_magnitude_{l,r}`（幅值 smoke，见 §3.2 caveat —— **不是** frame correctness gate）；IsaacSim viewer 里**绿色 F_ext 箭头随机出现**，**橙色 F_cmd 箭头不出现**
+- **档 3**（`cmd=T, ext=T`）：和训练末期行为最接近；`Episode/rew_wrist_force_position_tracking_exp ≥ 0.4`；两路 active_frac 都在 [0.2, 0.5]；`applied_f_body ≈ ext_magnitude`（同上 caveat）；IsaacSim viewer 里**橙 / 绿 两种箭头都出现**
+- **步数约定**：不强制 `max_eval_steps`，对齐 holosoma 系统约定默认 `None`（无限 loop；operator Ctrl+C 停）。operator 自己看够几次 F 的 activation 周期就停。
+- **frame sanity 缺口**（S0 明知的盲区，watch-item，操作时留意）：
+  - **已知的同义反复**：`applied_f_body_{l,r}` **当前**存的就是 `force_ext_w` 的 clone（`wbt_force_injected.py:95-96` 把 `force_w[:, 0/1]` 直接塞进 `last_applied_force_w_by_body_id`，**没做 world→body quaternion 旋转**），所以它的 norm 等于 `ext_magnitude` 是**数值上注定**的 —— S0 这条 "sanity" 仅是"把 world F_ext 转到 buffer 里没掉精度"的极弱 smoke，**不能**证明 `_rotate_force_world_to_body` / `set_external_force_and_torque` 的 frame convention 对。
+  - **norm 还是盲区**：就算未来把 `last_applied_force_w_by_body_id` 改存 body-frame（真的 quaternion rotate 过），norm 也对旋转不变，幅值比较依然测不出 quaternion 错、左右手换了、body_quat index 错这些 frame bug。
+  - **S0 的位置**：按路径 A 处理 —— **不动 code**，仅在 plan 里 flag 这条 caveat，operator dogfood 时注意"档 2 /档 3 viewer 里 wrist 真被推的方向/大小"对得上 F_ext 箭头方向就行。如果肉眼感觉 wrist 被推的方向和绿箭头不一致（比如箭头朝 +x 但 wrist 往 -x 偏），那就是 frame bug，operator 抓这个现象反馈，我们再启动路径 B（改 code 存 body-frame + 加 vector-level 断言）或 S1 backlog（paired cancellation 间接证 frame）。
+  - **要严格验这条**：做 vector-level 比较（log 实际传给 `set_external_force_and_torque` 的 body-frame 3-vector，vs 期望 `quat_apply_inverse(body_quat_w, force_ext_w)` 的 3-vector，按分量比）。S0 不做，留给 backlog S1。
+- **异常兼容**：baseline ckpt（`g1_29dof_wbt`）丢进来 → 立即 raise 明确错误，不进 sim（详见 §5.2 preflight contract）
 
 过了 GATE S0 → 可以往 parent plan Phase 8 部署推；或者 approve **v10 backlog** 的 Task 13.9a / 13.9b / 22 / 23 其中之一继续。
 
