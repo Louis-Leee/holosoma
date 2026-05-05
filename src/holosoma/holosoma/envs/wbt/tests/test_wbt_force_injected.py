@@ -28,7 +28,6 @@ from holosoma.config_types.command import CommandTermCfg, WristComplianceConfig 
 from holosoma.envs.wbt.wbt_force_injected import (  # noqa: E402
     COLOR_F_CMD,
     COLOR_F_EXT,
-    COLOR_F_TOTAL,
     WholeBodyTrackingForceInjected,
 )
 from holosoma.managers.command.terms.wbt_force import (  # noqa: E402
@@ -138,36 +137,13 @@ def test_draw_debug_viz_calls_draw_line_for_each_wrist_by_default() -> None:
     if True:
         env.draw_debug_viz()
 
-    # With debug_draw_total_arrow=True (default), we draw 3 arrows per wrist
-    # => 6 calls for 2 wrists.
-    assert draw_line.call_count == 6
-    assert draw_sphere.call_count == 6
+    # Draw 2 arrows per wrist (F_ext + F_cmd) => 4 calls for 2 wrists.
+    assert draw_line.call_count == 4
+    assert draw_sphere.call_count == 4
     colors = [call.args[3] for call in draw_line.call_args_list]
-    # Each wrist contributes exactly one of each color.
+    # Each wrist contributes exactly one F_ext and one F_cmd arrow.
     assert colors.count(COLOR_F_EXT) == 2
     assert colors.count(COLOR_F_CMD) == 2
-    assert colors.count(COLOR_F_TOTAL) == 2
-
-
-def test_draw_debug_viz_skips_total_when_disabled() -> None:
-    wrist_cfg = WristComplianceConfig(debug_draw_total_arrow=False)
-    wrist_cmd = _make_wrist_command(wrist_cfg=wrist_cfg)
-    env = _make_fake_env(wrist_cmd)
-    _inject_force(
-        wrist_cmd,
-        cmd_vec=torch.tensor([10.0, 0.0, 0.0]),
-        ext_vec=torch.tensor([0.0, 10.0, 0.0]),
-    )
-
-    draw_line = _fake_draw.draw_line
-    _fake_draw.draw_sphere.reset_mock()
-    draw_line.reset_mock()
-    if True:
-        env.draw_debug_viz()
-
-    assert draw_line.call_count == 4
-    colors = [call.args[3] for call in draw_line.call_args_list]
-    assert COLOR_F_TOTAL not in colors
 
 
 def test_draw_debug_viz_skips_zero_force_arrows() -> None:

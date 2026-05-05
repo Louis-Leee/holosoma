@@ -23,7 +23,6 @@ def test_default_construction_succeeds() -> None:
     assert cfg.right_wrist_body_name == "right_wrist_yaw_link"
     assert cfg.enable_left and cfg.enable_right
     assert cfg.debug_arrow_scale_n_per_m == 50.0
-    assert cfg.debug_draw_total_arrow is True
 
 
 def test_is_frozen() -> None:

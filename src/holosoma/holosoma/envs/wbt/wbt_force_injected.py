@@ -5,10 +5,9 @@ Extends :class:`WholeBodyTrackingManager` with:
 * ``_apply_force_in_physics_step``: rotates the command term's world-frame
   F_ext into body-local frame and writes it to the simulator for the two
   wrist bodies **only** (red line 1).
-* ``draw_debug_viz``: renders F_ext (red), F_cmd (blue) and optionally
-  F_total (purple) arrows at the two wrists of env 0 when the simulator's
-  debug viz is enabled. Wired into the simulator's per-render hook in
-  ``__init__``.
+* ``draw_debug_viz``: renders F_ext (green) and F_cmd (orange) arrows at
+  the two wrists of env 0 when the simulator's debug viz is enabled.
+  Wired into the simulator's per-render hook in ``__init__``.
 * ``_update_log_dict``: calls the command term's ``update_metrics()`` and
   merges "env-owned" wrist-tracking / applied-force keys into ``log_dict``
   for wandb (Task 9.5 contract).
@@ -30,9 +29,10 @@ if TYPE_CHECKING:
     from holosoma.config_types.command import WristComplianceConfig
 
 # Color constants for debug arrows (RGB tuples in [0,1]).
-COLOR_F_EXT: tuple[float, float, float] = (1.0, 0.0, 0.0)
-COLOR_F_CMD: tuple[float, float, float] = (0.0, 0.0, 1.0)
-COLOR_F_TOTAL: tuple[float, float, float] = (0.8, 0.0, 0.8)
+# F_cmd = orange (actor-observed force command)
+# F_ext = green (sim-injected external force)
+COLOR_F_CMD: tuple[float, float, float] = (1.0, 0.5, 0.0)
+COLOR_F_EXT: tuple[float, float, float] = (0.0, 0.8, 0.0)
 
 # Debug arrow min-norm threshold (skip zero arrows).
 _F_NORM_MIN_N: float = 1e-3
@@ -176,19 +176,6 @@ class WholeBodyTrackingForceInjected(WholeBodyTrackingManager):
                 COLOR_F_CMD,
                 env_id,
             )
-            # F_total arrow (purple), optional.
-            if wcfg.debug_draw_total_arrow:
-                f_total = f_ext_w[wrist_idx] + f_cmd_w[wrist_idx]
-                self._draw_arrow(
-                    draw_line,
-                    draw_sphere,
-                    sim,
-                    wrist_pos_w,
-                    f_total,
-                    scale,
-                    COLOR_F_TOTAL,
-                    env_id,
-                )
 
     @staticmethod
     def _draw_arrow(

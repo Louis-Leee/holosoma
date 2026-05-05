@@ -179,10 +179,6 @@ class WristComplianceConfig:
     """Arrow length in meters per Newton. 30 N / 50 N/m = 0.6 m -> about
     wrist-reach for visual clarity. Increase to shrink arrows."""
 
-    debug_draw_total_arrow: bool = True
-    """If True, draw the F_total = F_ext + F_cmd resultant arrow (purple)
-    in addition to F_ext (red) and F_cmd (blue)."""
-
     # ---- Enable flags + wrist body names ----
     enable_left: bool = True
     enable_right: bool = True
