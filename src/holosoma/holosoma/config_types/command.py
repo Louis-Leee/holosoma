@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic.dataclasses import dataclass
 
+from holosoma.config_values.wbt.g1._k_virtual import K_VIRTUAL_RANGE_N_PER_M
+
 
 @dataclass(frozen=True)
 class CommandTermCfg:
@@ -129,3 +131,98 @@ class MotionConfig:
 
     # noise related
     noise_to_initial_pose: NoiseToInitialPoseConfig = field(default_factory=NoiseToInitialPoseConfig)
+
+
+########################################################################################################################
+# Wrist compliance command configuration (WBT wrist-force, v10)
+########################################################################################################################
+@dataclass(frozen=True)
+class WristComplianceConfig:
+    """Configuration for the WBT wrist-force ``WristComplianceCommand`` term.
+
+    Controls sampling of two per-wrist signals exposed to the reward and
+    observations:
+
+    * ``F_cmd`` (body-yaw frame): the 6-D force the policy is asked to produce.
+    * ``F_ext`` (world frame): a randomly sampled external disturbance applied
+      to the wrist body in the simulator.
+
+    Both signals use the same trapezoidal state machine
+    (``COOLDOWN -> RAMP_UP -> HOLD -> RAMP_DOWN -> COOLDOWN``) with independent
+    magnitude/duration/cooldown ranges. ``k_virtual_range`` is per-wrist,
+    per-env, resampled only on episode reset (matches GH motion-tracking kp
+    convention).
+
+    See ``docs/plans/2026-05-03-wbt-wrist-force-v10.md`` (Task 1) for the full
+    rationale.
+    """
+
+    # ---- F_cmd (policy-visible, body-yaw frame) ----
+    force_cmd_magnitude_range: tuple[float, float] = (5.0, 30.0)
+    force_cmd_duration_range_s: tuple[float, float] = (1.0, 3.0)
+    force_cmd_cooldown_range_s: tuple[float, float] = (0.5, 2.0)
+    force_cmd_ramp_frac: float = 0.25
+    force_cmd_activation_prob_per_step: float = 0.01
+
+    # ---- F_ext (sim-injected disturbance, world frame) ----
+    force_ext_magnitude_range: tuple[float, float] = (0.0, 30.0)
+    force_ext_duration_range_s: tuple[float, float] = (1.0, 3.0)
+    force_ext_cooldown_range_s: tuple[float, float] = (0.5, 2.0)
+    force_ext_ramp_frac: float = 0.25
+    force_ext_activation_prob_per_step: float = 0.01
+
+    # ---- Virtual spring stiffness (reward hyperparameter, not a real K) ----
+    k_virtual_range: tuple[float, float] = K_VIRTUAL_RANGE_N_PER_M
+
+    # ---- Debug-draw visual scale (Task 3 draw_debug_viz) ----
+    debug_arrow_scale_n_per_m: float = 50.0
+    """Arrow length in meters per Newton. 30 N / 50 N/m = 0.6 m -> about
+    wrist-reach for visual clarity. Increase to shrink arrows."""
+
+    debug_draw_total_arrow: bool = True
+    """If True, draw the F_total = F_ext + F_cmd resultant arrow (purple)
+    in addition to F_ext (red) and F_cmd (blue)."""
+
+    # ---- Enable flags + wrist body names ----
+    enable_left: bool = True
+    enable_right: bool = True
+    left_wrist_body_name: str = "left_wrist_yaw_link"
+    right_wrist_body_name: str = "right_wrist_yaw_link"
+
+    def __post_init__(self) -> None:
+        # k_virtual must be strictly positive (reward divides by it after
+        # clamp(min=1e-3), but we still want a sane config).
+        assert self.k_virtual_range[0] > 0.0, f"k_virtual_range lower bound must be > 0, got {self.k_virtual_range}"
+        assert self.k_virtual_range[0] <= self.k_virtual_range[1], (
+            f"k_virtual_range must satisfy lo <= hi, got {self.k_virtual_range}"
+        )
+
+        # magnitude ranges: lo <= hi, lo >= 0.
+        for name, rng in (
+            ("force_cmd_magnitude_range", self.force_cmd_magnitude_range),
+            ("force_ext_magnitude_range", self.force_ext_magnitude_range),
+        ):
+            assert rng[0] >= 0.0, f"{name} lower bound must be >= 0, got {rng}"
+            assert rng[0] <= rng[1], f"{name} must satisfy lo <= hi, got {rng}"
+
+        # duration + cooldown ranges: lo >= 0, lo <= hi.
+        for name, rng in (
+            ("force_cmd_duration_range_s", self.force_cmd_duration_range_s),
+            ("force_cmd_cooldown_range_s", self.force_cmd_cooldown_range_s),
+            ("force_ext_duration_range_s", self.force_ext_duration_range_s),
+            ("force_ext_cooldown_range_s", self.force_ext_cooldown_range_s),
+        ):
+            assert rng[0] >= 0.0, f"{name} lower bound must be >= 0, got {rng}"
+            assert rng[0] <= rng[1], f"{name} must satisfy lo <= hi, got {rng}"
+
+        # ramp fractions must be in [0, 0.5] so ramp_up + ramp_down <= duration.
+        for name, frac in (
+            ("force_cmd_ramp_frac", self.force_cmd_ramp_frac),
+            ("force_ext_ramp_frac", self.force_ext_ramp_frac),
+        ):
+            assert 0.0 <= frac <= 0.5, f"{name} must be in [0, 0.5], got {frac}"
+
+        # debug arrow scale must be strictly positive (we divide by it).
+        assert self.debug_arrow_scale_n_per_m > 0.0, (
+            f"debug_arrow_scale_n_per_m must be > 0, got {self.debug_arrow_scale_n_per_m}"
+        )

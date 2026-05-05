@@ -983,6 +983,12 @@ class FastSACAgent(BaseAlgo):
         # Extract URDF text from the robot config
         urdf_file_path, urdf_str = get_urdf_text_from_robot_config(self.env.robot_config)
 
+        # Observation schema fields (Task 13.5) — inference-side strict
+        # compare reads these to detect train/infer obs drift.
+        obs_cfg = self.env.observation_manager.cfg
+        actor_obs_cfg = obs_cfg.groups["actor_obs"]
+        obs_dims = self.env.observation_manager.get_obs_dims()
+
         metadata = {
             "dof_names": self.env.robot_config.dof_names,
             "kp": kp_list,
@@ -991,6 +997,9 @@ class FastSACAgent(BaseAlgo):
             "command_ranges": cmd_ranges,
             "robot_urdf": urdf_str,
             "robot_urdf_path": urdf_file_path,
+            "history_length": actor_obs_cfg.history_length,
+            "obs_term_names_sorted": sorted(actor_obs_cfg.terms.keys()),
+            "obs_group_dims": dict(obs_dims),
         }
         metadata.update(self._checkpoint_metadata(iteration=self.global_step))
 
