@@ -16,6 +16,7 @@ import torch
 from holosoma.config_types.command import CommandTermCfg, WristComplianceConfig
 from holosoma.managers.command.terms.wbt_force import WristComplianceCommand
 from holosoma.managers.reward.terms.wbt_force import (
+    _yaw_rotate_body_to_world,
     wrist_force_position_tracking_exp,
 )
 
@@ -42,7 +43,7 @@ def _make_env(
     wrist_cmd: WristComplianceCommand,
     *,
     num_envs: int = 2,
-    base_quat_wxyz: torch.Tensor | None = None,
+    base_quat_xyzw: torch.Tensor | None = None,
     num_bodies: int = 30,
     wrist_pos_offset: torch.Tensor | None = None,
 ) -> SimpleNamespace:
@@ -61,9 +62,9 @@ def _make_env(
         side_effect=lambda name: {LEFT_NAME: LEFT_ID, RIGHT_NAME: RIGHT_ID}[name],
     )
 
-    if base_quat_wxyz is None:
-        base_quat_wxyz = torch.zeros(num_envs, 4)
-        base_quat_wxyz[:, 0] = 1.0  # wxyz identity
+    if base_quat_xyzw is None:
+        base_quat_xyzw = torch.zeros(num_envs, 4)
+        base_quat_xyzw[:, 3] = 1.0  # xyzw identity (w at index 3)
 
     # No motion_command → motion target falls back to actual wrist pos,
     # so the residual is purely the virtual-spring shift.
@@ -71,7 +72,7 @@ def _make_env(
         num_envs=num_envs,
         device="cpu",
         simulator=sim,
-        base_quat=base_quat_wxyz,
+        base_quat=base_quat_xyzw,
         command_manager=SimpleNamespace(
             get_state=lambda name: wrist_cmd if name == "wrist_compliance_command" else None,
         ),
@@ -135,11 +136,48 @@ def test_opposing_f_cmd_and_f_ext_cancel() -> None:
     torch.testing.assert_close(r, torch.ones(2), atol=1e-5, rtol=0)
 
 
+def test_yaw_rotation_vector_level_xyzw_identity() -> None:
+    # xyzw identity → body-frame force passes through unchanged. Vector-level
+    # comparison (not just norm), so a wrong-convention rotation would fail.
+    identity_xyzw = torch.zeros(2, 4)
+    identity_xyzw[:, 3] = 1.0
+    force_b = torch.tensor([[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]]).expand(2, -1, -1).contiguous()
+    out = _yaw_rotate_body_to_world(identity_xyzw, force_b)
+    torch.testing.assert_close(out, force_b, atol=1e-6, rtol=0)
+
+
+def test_yaw_rotation_vector_level_90deg_xyzw() -> None:
+    # xyzw 90deg yaw around +z → body +x maps to world +y; body +y maps to -x;
+    # body +z is yaw-invariant. Check component-by-component so same-magnitude
+    # but wrong-direction outputs (e.g. +x, -y, rotated somewhere else on the
+    # xy-plane) would fail this assertion.
+    half = math.pi / 4
+    base_q = torch.tensor([[0.0, 0.0, math.sin(half), math.cos(half)]])  # xyzw
+    base_q = base_q.expand(3, -1).contiguous()
+    # 3 batch envs × 2 wrists × 3 components — distinct vectors per wrist.
+    force_b = torch.tensor(
+        [
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            [[0.0, 0.0, 1.0], [1.0, 1.0, 1.0]],
+            [[-2.0, 0.0, 0.0], [0.0, -3.0, 0.0]],
+        ]
+    )
+    expected_w = torch.tensor(
+        [
+            [[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]],  # +x→+y, +y→-x
+            [[0.0, 0.0, 1.0], [-1.0, 1.0, 1.0]],  # +z invariant, (1,1,1)→(-1,1,1)
+            [[0.0, -2.0, 0.0], [3.0, 0.0, 0.0]],  # sign flips carried through
+        ]
+    )
+    out = _yaw_rotate_body_to_world(base_q, force_b)
+    torch.testing.assert_close(out, expected_w, atol=1e-6, rtol=0)
+
+
 def test_yaw_rotation_maps_body_force_to_world() -> None:
-    # base_quat 90deg yaw (wxyz) → body +x maps to world +y.
+    # base_quat 90deg yaw (xyzw) → body +x maps to world +y.
     yaw = math.pi / 2
     half = yaw / 2
-    base_q = torch.tensor([[math.cos(half), 0.0, 0.0, math.sin(half)]])  # wxyz
+    base_q = torch.tensor([[0.0, 0.0, math.sin(half), math.cos(half)]])  # xyzw
     base_q = base_q.expand(2, -1).contiguous()
 
     term = _make_wrist_command()
@@ -147,7 +185,7 @@ def test_yaw_rotation_maps_body_force_to_world() -> None:
     term._cmd_channel.force[:, 0] = torch.tensor([20.0, 0.0, 0.0])
     term._cmd_channel.force[:, 1] = torch.tensor([20.0, 0.0, 0.0])
 
-    env = _make_env(term, base_quat_wxyz=base_q)
+    env = _make_env(term, base_quat_xyzw=base_q)
     r = wrist_force_position_tracking_exp(env, 0.3, LEFT_NAME, RIGHT_NAME)  # type: ignore[arg-type]
     expected = _expected_exp(0.2, 0.3)
     torch.testing.assert_close(r, torch.full((2,), expected, dtype=r.dtype))

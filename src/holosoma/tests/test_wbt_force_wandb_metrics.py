@@ -137,7 +137,7 @@ def _make_env_with_term(term: WristComplianceCommand, num_envs: int = 4):
     env.num_envs = num_envs
     env.device = "cpu"
     env.base_quat = torch.zeros(num_envs, 4)
-    env.base_quat[:, 0] = 1.0
+    env.base_quat[:, 3] = 1.0  # xyzw identity (w at index 3)
     env._left_wrist_isaac_id = LEFT_ID
     env._right_wrist_isaac_id = RIGHT_ID
     env._wrist_body_ids_t = torch.tensor([LEFT_ID, RIGHT_ID], dtype=torch.long)
@@ -200,7 +200,7 @@ def test_baseline_wbt_log_dict_has_no_force_keys() -> None:
     env.num_envs = 2
     env.device = "cpu"
     env.base_quat = torch.zeros(2, 4)
-    env.base_quat[:, 0] = 1.0
+    env.base_quat[:, 3] = 1.0  # xyzw identity (w at index 3)
     env._left_wrist_isaac_id = LEFT_ID
     env._right_wrist_isaac_id = RIGHT_ID
     env._wrist_body_ids_t = torch.tensor([LEFT_ID, RIGHT_ID], dtype=torch.long)

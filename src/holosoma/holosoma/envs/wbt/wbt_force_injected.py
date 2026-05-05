@@ -145,8 +145,8 @@ class WholeBodyTrackingForceInjected(WholeBodyTrackingManager):
         # F_ext (world frame) and F_cmd (body-yaw → world) for env 0.
         f_ext_w = wrist_cmd.force_ext_w[env_id]  # (2, 3) cpu-or-device
         f_cmd_b = wrist_cmd.force_cmd_b[env_id]  # (2, 3) body-yaw frame
-        # Rotate F_cmd body-yaw → world using base_quat yaw (wxyz convention
-        # from IsaacLab; base_quat on the env subclass is already wxyz).
+        # Rotate F_cmd body-yaw → world using base_quat yaw. ``env.base_quat``
+        # is xyzw (from ``simulator.base_quat = robot_root_states[:, 3:7]``).
         f_cmd_w = self._rotate_body_yaw_to_world(f_cmd_b, env_id)
 
         for wrist_idx, body_id in enumerate(body_ids):
@@ -307,23 +307,29 @@ class WholeBodyTrackingForceInjected(WholeBodyTrackingManager):
         return torch.stack([left_f_b, right_f_b], dim=1)
 
     def _rotate_body_yaw_to_world(self, force_b: torch.Tensor, env_id: int) -> torch.Tensor:
-        """Rotate a single env's (2, 3) body-yaw F_cmd to world using base yaw."""
+        """Rotate a single env's (2, 3) body-yaw F_cmd to world using base yaw.
+
+        ``self.base_quat`` is xyzw (from ``simulator.base_quat``).
+        """
         from holosoma.utils.rotations import quat_apply, yaw_quat
 
-        base_q = self.base_quat[env_id : env_id + 1]  # (1, 4) wxyz
-        yaw_q = yaw_quat(base_q, w_last=False)  # (1, 4) wxyz
+        base_q = self.base_quat[env_id : env_id + 1]  # (1, 4) xyzw
+        yaw_q = yaw_quat(base_q, w_last=True)  # (1, 4) xyzw
         # Duplicate yaw_q over the 2 wrists.
         yaw_q2 = yaw_q.expand(2, -1)
-        return quat_apply(yaw_q2, force_b, w_last=False)
+        return quat_apply(yaw_q2, force_b, w_last=True)
 
     def _rotate_body_yaw_to_world_batch(self, force_b: torch.Tensor) -> torch.Tensor:
-        """Rotate a batched (N, 2, 3) body-yaw force to world frame."""
+        """Rotate a batched (N, 2, 3) body-yaw force to world frame.
+
+        ``self.base_quat`` is xyzw (from ``simulator.base_quat``).
+        """
         from holosoma.utils.rotations import quat_apply, yaw_quat
 
-        yaw_q = yaw_quat(self.base_quat, w_last=False)  # (N, 4) wxyz
+        yaw_q = yaw_quat(self.base_quat, w_last=True)  # (N, 4) xyzw
         yaw_q_nw = yaw_q.unsqueeze(1).expand(-1, 2, -1).reshape(-1, 4)  # (N*2, 4)
         flat = force_b.reshape(-1, 3)  # (N*2, 3)
-        out = quat_apply(yaw_q_nw, flat, w_last=False)
+        out = quat_apply(yaw_q_nw, flat, w_last=True)
         return out.view(force_b.shape)
 
     def _motion_target_wrist_positions_w(self) -> torch.Tensor:

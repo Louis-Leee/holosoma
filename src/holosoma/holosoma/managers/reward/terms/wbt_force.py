@@ -39,14 +39,19 @@ def _get_wrist_command(env: WholeBodyTrackingManager) -> WristComplianceCommand:
     return term
 
 
-def _yaw_rotate_body_to_world(base_quat_wxyz: torch.Tensor, force_b_nw3: torch.Tensor) -> torch.Tensor:
-    """Rotate ``(N, 2, 3)`` body-yaw force to world frame using base yaw."""
+def _yaw_rotate_body_to_world(base_quat_xyzw: torch.Tensor, force_b_nw3: torch.Tensor) -> torch.Tensor:
+    """Rotate ``(N, 2, 3)`` body-yaw force to world frame using base yaw.
+
+    ``env.base_quat`` flows from ``simulator.base_quat`` which slices
+    ``robot_root_states[:, 3:7]`` (xyzw — see ``simulator/isaacsim/isaacsim.py``).
+    Callers must pass that buffer directly.
+    """
     from holosoma.utils.rotations import quat_apply, yaw_quat
 
-    yaw_q = yaw_quat(base_quat_wxyz, w_last=False)  # (N, 4) wxyz
+    yaw_q = yaw_quat(base_quat_xyzw, w_last=True)  # (N, 4) xyzw
     yaw_q_nw = yaw_q.unsqueeze(1).expand(-1, force_b_nw3.shape[1], -1).reshape(-1, 4)
     flat = force_b_nw3.reshape(-1, 3)
-    out = quat_apply(yaw_q_nw, flat, w_last=False)
+    out = quat_apply(yaw_q_nw, flat, w_last=True)
     return out.view(force_b_nw3.shape)
 
 

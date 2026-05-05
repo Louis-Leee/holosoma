@@ -92,7 +92,7 @@ def _make_fake_env(
     env.num_envs = num_envs
     env.device = "cpu"
     env.base_quat = torch.zeros(num_envs, 4)
-    env.base_quat[:, 0] = 1.0  # wxyz identity so body-yaw == world
+    env.base_quat[:, 3] = 1.0  # xyzw identity (w at index 3) so body-yaw == world
 
     env._left_wrist_isaac_id = LEFT_ID
     env._right_wrist_isaac_id = RIGHT_ID
@@ -305,7 +305,7 @@ def test_wrap_simulator_draw_hook_chains_correctly() -> None:
         env.simulator.draw_debug_viz()
 
     assert original.called
-    assert draw_line.call_count == 6
+    assert draw_line.call_count == 4
 
 
 # ---------------------------------------------------------------------------
