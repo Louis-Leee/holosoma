@@ -68,6 +68,20 @@ LOGGER="${LOGGER:-wandb}"
 SEED="${SEED:-1}"
 SKIP_REINSTALL="${SKIP_REINSTALL:-0}"
 MOTION_FILE="${MOTION_FILE:-}"
+NUM_GPUS="${NUM_GPUS:-1}"
+
+# Sanity-check NUM_GPUS against CUDA_VISIBLE_DEVICES / nvidia-smi. NOTE:
+# plain `python src/.../train_agent.py ...` does NOT use any GPU past cuda:0 —
+# IsaacSim spreads some context across visible GPUs so nvidia-smi may show
+# small allocations on every card, but the actual training process is
+# single-rank unless launched via torchrun. Set NUM_GPUS>1 to opt in.
+if [ "$NUM_GPUS" -gt 1 ]; then
+    if ! command -v torchrun >/dev/null 2>&1; then
+        echo "Error: NUM_GPUS=${NUM_GPUS} requested but torchrun is not on PATH."
+        echo "Install pytorch or source scripts/source_isaacsim_setup.sh first."
+        exit 1
+    fi
+fi
 
 # Step 1: Source IsaacSim setup (matches demo_omomo_wb_tracking.sh step 3)
 echo "Sourcing IsaacSim setup..."
@@ -120,6 +134,7 @@ echo "  exp        : g1-29dof-wbt-force"
 echo "  simulator  : ${SIMULATOR}"
 echo "  logger     : ${LOGGER}"
 echo "  seed       : ${SEED}"
+echo "  NUM_GPUS   : ${NUM_GPUS}"
 if [ -n "$MOTION_FILE" ]; then
     echo "  motion_file: ${MOTION_FILE}"
 fi
@@ -148,6 +163,15 @@ Phase 7 TRAIN GATE — wandb indicators to eyeball during training
 
 EOF
 
-python src/holosoma/holosoma/train_agent.py "${TRAIN_ARGS[@]}"
+if [ "$NUM_GPUS" -gt 1 ]; then
+    echo "Launching multi-GPU via torchrun --nproc_per_node=${NUM_GPUS}"
+    echo "  Each rank instantiates its own sim + policy; PPO all-reduces gradients."
+    echo "  Per-rank num_envs defaults to preset (4096); total batch = 4096 * NUM_GPUS"
+    echo "  (Strategy A — scale total batch). Override via --training.num_envs."
+    torchrun --nproc_per_node="${NUM_GPUS}" --standalone \
+        src/holosoma/holosoma/train_agent.py "${TRAIN_ARGS[@]}"
+else
+    python src/holosoma/holosoma/train_agent.py "${TRAIN_ARGS[@]}"
+fi
 
 echo "Done!"
