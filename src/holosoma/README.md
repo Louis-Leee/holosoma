@@ -145,6 +145,57 @@ This evaluation mode:
   - `q`/`e`: angular velocity commands
   - `z`: zero velocity command
 
+### In-Training Force-Aware Evaluation
+
+For WBT wrist-force checkpoints (`exp:g1-29dof-wbt-force`), use the
+force-aware evaluation entry point, which reuses the training-time
+random force schedule:
+
+```bash
+# Mode 0 — baseline-like (both force channels disabled; regression check)
+python src/holosoma/holosoma/eval_agent_force.py \
+    --checkpoint=<CHECKPOINT_PATH> \
+    --no-enable-force-cmd --no-enable-force-ext
+
+# Mode 1 — F_cmd only (actor obs channel active; sim untouched)
+python src/holosoma/holosoma/eval_agent_force.py \
+    --checkpoint=<CHECKPOINT_PATH> \
+    --no-enable-force-ext
+
+# Mode 2 — F_ext only (sim-injected ext force; actor gets no F_cmd obs)
+python src/holosoma/holosoma/eval_agent_force.py \
+    --checkpoint=<CHECKPOINT_PATH> \
+    --no-enable-force-cmd
+
+# Mode 3 — Full training schedule (defaults; both channels active)
+python src/holosoma/holosoma/eval_agent_force.py \
+    --checkpoint=wandb://<ENTITY>/<PROJECT>/<RUN_ID>/<CHECKPOINT_NAME>
+```
+
+Flags (two independent channels; both default to `True`; use tyro's
+`--no-<name>` prefix to disable — space-separated or `=False` forms are
+interpreted as positional args, not bool values):
+- `--no-enable-force-cmd`: zero out F_cmd. F_cmd stays at zero and the
+  actor `wrist_force_command` obs is effectively muted.
+- `--no-enable-force-ext`: zero out F_ext. No external force is applied —
+  sim wrists see no external perturbation.
+- Defaults: F_cmd/F_ext both sampled with the training-time random schedule
+  (`force_{cmd,ext}_magnitude_range=(5,30)/(0,30) N`, ramp/hold/cooldown
+  state machine, activation prob 0.01 per step).
+
+Run modes in order for a full sanity pass (hardest to detect issues last):
+1. Mode 0 — verify no regression vs pure motion tracking.
+2. Mode 1 — verify policy responds to `wrist_force_command` obs.
+3. Mode 2 — verify policy stays up under hidden external force.
+4. Mode 3 — verify full training-time behavior reproduces.
+
+Sanity checks to eyeball during rollout:
+- G1 tracks the motion clip (baseline WBT behavior in all modes)
+- Mode 1: wrist positions show visible shifts when F_cmd triggers
+- Mode 2: sim physics pushes the wrist; policy compensates to stay on motion
+- Mode 3: Wandb `Episode/rew_wrist_force_position_tracking_exp >= 0.4`
+- Mode 2 / Mode 3: Wandb `Env/force/applied_f_body_{l,r} == Env/force/ext_magnitude_{l,r}`
+
 ### Cross-Simulator Evaluation (MuJoCo)
 
 For testing trained policies in MuJoCo simulation or deploying to real robots, see the [holosoma_inference documentation](../holosoma_inference/README.md). This covers:
