@@ -62,9 +62,11 @@ class WholeBodyTrackingForceInjectedV2(WholeBodyTrackingManager):
             dtype=torch.long,
         )
 
-        # Debug snapshot: world-frame force per isaac body id (for diagnostics /
-        # wandb env-owned metrics).
-        self.last_applied_force_w_by_body_id: dict[int, torch.Tensor] = {}
+        # Debug snapshot of the per-wrist force that was actually pushed to
+        # the simulator, keyed by isaac body id. Stored in **body frame** —
+        # the same frame IsaacLab's ``set_external_force_and_torque`` expects.
+        # Consumed by wandb env-owned metrics (``force/applied_f_body_{l,r}``).
+        self.last_applied_force_b_by_body_id: dict[int, torch.Tensor] = {}
 
         # Wire env-level arrow drawing into the simulator's per-render hook.
         self._wrap_simulator_draw_hook()
@@ -113,12 +115,14 @@ class WholeBodyTrackingForceInjectedV2(WholeBodyTrackingManager):
             body_ids=self._wrist_body_ids_t,
         )
 
-        # Debug snapshot. Detach + clone so downstream code can't mutate it.
-        self.last_applied_force_w_by_body_id[self._left_wrist_isaac_id] = (
-            force_w[:, 0].detach().clone()
+        # Debug snapshot of the body-frame forces that were actually pushed
+        # to the simulator (same frame as set_external_force_and_torque).
+        # Detach + clone so downstream code can't mutate it.
+        self.last_applied_force_b_by_body_id[self._left_wrist_isaac_id] = (
+            forces_body[:, 0].detach().clone()
         )
-        self.last_applied_force_w_by_body_id[self._right_wrist_isaac_id] = (
-            force_w[:, 1].detach().clone()
+        self.last_applied_force_b_by_body_id[self._right_wrist_isaac_id] = (
+            forces_body[:, 1].detach().clone()
         )
 
     def _rotate_force_world_to_body(self, force_w: torch.Tensor) -> torch.Tensor:
@@ -247,9 +251,14 @@ class WholeBodyTrackingForceInjectedV2(WholeBodyTrackingManager):
         metrics: dict[str, torch.Tensor] = {}
         device = self.device
 
-        # Applied body-frame F norms (sanity for the world→body rotation path).
-        applied_l = self.last_applied_force_w_by_body_id.get(self._left_wrist_isaac_id)
-        applied_r = self.last_applied_force_w_by_body_id.get(self._right_wrist_isaac_id)
+        # Applied body-frame F norms (sanity for the world->body rotation
+        # path). NOTE: V10's ``wbt_force_injected.py`` emits the same metric
+        # name but stores the world-frame snapshot; do not cross-compare V10
+        # and V14 runs on this key directly. Only the norm is logged and
+        # rotation preserves norm, so numerically they still match, but the
+        # underlying vector semantics differ.
+        applied_l = self.last_applied_force_b_by_body_id.get(self._left_wrist_isaac_id)
+        applied_r = self.last_applied_force_b_by_body_id.get(self._right_wrist_isaac_id)
         zeros = torch.zeros(self.num_envs, dtype=torch.float32, device=device)
         metrics["force/applied_f_body_l"] = (
             applied_l.norm(dim=-1).float().to(device) if applied_l is not None else zeros
@@ -262,7 +271,12 @@ class WholeBodyTrackingForceInjectedV2(WholeBodyTrackingManager):
         ext_any_active = (wrist_cmd._ext_channel.state != 0).any(dim=-1).float()
         metrics["force/active_window_flag"] = ext_any_active
 
-        # Termination-rate monitor: track resets coincident with active ext force.
+        # Termination-rate monitor: track resets coincident with active ext
+        # force. NOTE: base_task calls ``_update_log_dict`` BEFORE the next
+        # ``reset_envs_idx``/``reset_scene``, so ``last_reset_ids`` is the
+        # PREVIOUS tick's reset set. That is a 1-step lag, but fine for rate
+        # monitoring over a rollout — just do not read ``term_rate_*`` as an
+        # exact per-step spike signal.
         last_reset_ids = getattr(getattr(self, "reset_manager", None), "last_reset_ids", None)
         if last_reset_ids is not None:
             reset_mask = torch.zeros(self.num_envs, dtype=torch.float32, device=device)
@@ -282,17 +296,33 @@ class WholeBodyTrackingForceInjectedV2(WholeBodyTrackingManager):
         self,
         wrist_cmd: WristForceTrackingCommand,
     ) -> dict[str, torch.Tensor]:
-        """Read wrist body_incoming_wrench_b (if available) and compare against F_cmd_b.
+        """Compare joint reaction wrench at each wrist against F_cmd.
 
-        Log-only diagnostic for the Q1 closure mechanism. Returns an empty
-        dict if the simulator backend does not expose ``body_incoming_wrench_b``.
+        Uses IsaacLab's lazy property ``body_incoming_joint_wrench_b`` which
+        returns the wrench parent applies to child **in the parent body
+        frame** (IsaacLab ArticulationData docs; for a wrist link the parent
+        is the forearm). The ``cos`` metric rotates the wrench into world
+        using the wrist's own ``body_quat_w`` — this is a fast approximation
+        that assumes wrist<->forearm deflection is small; expect a few
+        percent cosine noise when the wrist joint is near limits.
+
+        The ``mag_ratio`` metric is **frame-invariant** (only uses norms), so
+        it is the robust half of this diagnostic.
+
+        Silently skipped if the simulator backend does not expose the
+        property (e.g. CPU test mocks).
         """
         sim = self.simulator
         wrench_buf = getattr(getattr(sim, "_robot", None), "data", None)
-        if wrench_buf is None or not hasattr(wrench_buf, "body_incoming_wrench_b"):
+        if wrench_buf is None or not hasattr(wrench_buf, "body_incoming_joint_wrench_b"):
             return {}
 
-        wrench_b = wrench_buf.body_incoming_wrench_b  # (N, num_bodies, 6)
+        try:
+            wrench_b = wrench_buf.body_incoming_joint_wrench_b  # (N, num_bodies, 6)
+            lq = wrench_buf.body_quat_w[:, self._left_wrist_isaac_id]
+            rq = wrench_buf.body_quat_w[:, self._right_wrist_isaac_id]
+        except (AttributeError, RuntimeError):
+            return {}
         if wrench_b is None:
             return {}
 
@@ -301,8 +331,6 @@ class WholeBodyTrackingForceInjectedV2(WholeBodyTrackingManager):
         f_cmd_w = wrist_cmd._rotate_cmd_obs_to_world(wrist_cmd.force_cmd_b)  # (N, 2, 3)
         from isaaclab.utils.math import quat_apply as _quat_apply
 
-        lq = wrench_buf.body_quat_w[:, self._left_wrist_isaac_id]
-        rq = wrench_buf.body_quat_w[:, self._right_wrist_isaac_id]
         left_f_w = _quat_apply(lq, left_f_b)
         right_f_w = _quat_apply(rq, right_f_b)
 
