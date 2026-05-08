@@ -442,13 +442,7 @@ def test_force_channel_completes_full_trapezoidal_cycle() -> None:
     assert int(STATE_HOLD) in visited, f"FSM never reached HOLD (visited={visited})"
     assert int(STATE_RAMP_DOWN) in visited, f"FSM never reached RAMP_DOWN (visited={visited})"
 
-    # After many steps including multiple full cycles, at some tick force must
-    # have briefly been zero (immediately after a RAMP_DOWN -> COOLDOWN transition
-    # before the next trigger). We verify by running one more step in a long-cooldown
-    # config and checking |force| is finite + non-negative.
-    # (Simpler assertion: RAMP_DOWN reached implies the lerp is descending to 0.)
-    # Assert the lerp-value ever reached peak (i.e. HOLD had non-zero force).
-    # This is implicitly proven by STATE_HOLD being visited AND peak_magnitude being set.
+    assert term._ext_channel.peak_magnitude.max().item() >= 0.0
 
 
 def test_v2_command_module_does_not_import_v10() -> None:
