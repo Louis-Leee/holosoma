@@ -7,8 +7,8 @@ reset events in a simulation environment.
 from __future__ import annotations
 
 from holosoma.simulator.base_simulator.base_simulator import BaseSimulator
-from holosoma.utils.helpers import instantiate
 from holosoma.simulator.types import EnvIds
+from holosoma.utils.helpers import instantiate
 
 from . import ResetManagerConfig
 from .base import ResetEvent
@@ -39,6 +39,11 @@ class ResetEventManager:
     def __init__(self, config: ResetManagerConfig, simulator: BaseSimulator, device: str):
         """Initialize the reset event manager."""
         self.events: list[ResetEvent] = []
+        # Most recent env_ids passed to reset_scene. None until the first
+        # reset. Task-specific metrics (e.g. wbt-force-v2
+        # force/term_rate_{active,inactive}_ext) read this to tell which envs
+        # terminated this tick.
+        self.last_reset_ids: EnvIds | None = None
 
         # Instantiate events from config using our custom instantiate
         for event_config in config.events:
@@ -53,5 +58,6 @@ class ResetEventManager:
         Iterates through all registered reset events and executes them
         in sequence for the specified environment IDs.
         """
+        self.last_reset_ids = env_ids
         for event in self.events:
             event.reset(env_ids)
