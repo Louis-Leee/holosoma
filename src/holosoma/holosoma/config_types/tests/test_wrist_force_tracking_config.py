@@ -103,8 +103,12 @@ def test_debug_arrow_scale_must_be_positive() -> None:
 
 
 def test_activation_prob_must_be_in_range() -> None:
+    # 0.0 is now valid (needed by curriculum-only tests that disable sampling).
+    WristForceTrackingConfig(force_ext_activation_prob_per_step=0.0)
+    # negative values still invalid.
     with pytest.raises(_ConfigError):
-        WristForceTrackingConfig(force_ext_activation_prob_per_step=0.0)
+        WristForceTrackingConfig(force_ext_activation_prob_per_step=-0.1)
+    # above 1.0 still invalid.
     with pytest.raises(_ConfigError):
         WristForceTrackingConfig(force_ext_activation_prob_per_step=1.1)
 

@@ -69,8 +69,8 @@ class WristForceTrackingConfig:
         assert 0.0 <= self.force_ext_ramp_frac <= 0.5, (
             f"force_ext_ramp_frac must be in [0, 0.5], got {self.force_ext_ramp_frac}"
         )
-        assert 0.0 < self.force_ext_activation_prob_per_step <= 1.0, (
-            f"force_ext_activation_prob_per_step must be in (0, 1], "
+        assert 0.0 <= self.force_ext_activation_prob_per_step <= 1.0, (
+            f"force_ext_activation_prob_per_step must be in [0, 1], "
             f"got {self.force_ext_activation_prob_per_step}"
         )
         assert self.debug_arrow_scale_n_per_m > 0.0, (
