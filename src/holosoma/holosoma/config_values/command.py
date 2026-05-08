@@ -7,6 +7,10 @@ from holosoma.config_values.wbt.g1.command import (
     g1_29dof_wbt_command_w_object,
 )
 from holosoma.config_values.wbt.g1.command_force import g1_29dof_wbt_force_command
+from holosoma.config_values.wbt.g1.command_force_v2 import (
+    g1_29dof_wbt_force_v2_command,
+    g1_29dof_wbt_force_v2_fullbase_command,
+)
 
 none = None
 
@@ -17,4 +21,6 @@ DEFAULTS = {
     "g1_29dof_wbt": g1_29dof_wbt_command,
     "g1_29dof_wbt_w_object": g1_29dof_wbt_command_w_object,
     "g1_29dof_wbt_force": g1_29dof_wbt_force_command,
+    "g1_29dof_wbt_force_v2": g1_29dof_wbt_force_v2_command,
+    "g1_29dof_wbt_force_v2_fullbase": g1_29dof_wbt_force_v2_fullbase_command,
 }

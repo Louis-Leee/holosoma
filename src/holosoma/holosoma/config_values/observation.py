@@ -4,6 +4,7 @@ from holosoma.config_values.loco.g1.observation import g1_29dof_loco_single_woli
 from holosoma.config_values.loco.t1.observation import t1_29dof_loco_single_wolinvel
 from holosoma.config_values.wbt.g1.observation import g1_29dof_wbt_observation, g1_29dof_wbt_observation_w_object
 from holosoma.config_values.wbt.g1.observation_force import g1_29dof_wbt_force_observation
+from holosoma.config_values.wbt.g1.observation_force_v2 import g1_29dof_wbt_force_v2_observation
 
 none = None
 
@@ -14,4 +15,6 @@ DEFAULTS = {
     "g1_29dof_wbt": g1_29dof_wbt_observation,
     "g1_29dof_wbt_w_object": g1_29dof_wbt_observation_w_object,
     "g1_29dof_wbt_force": g1_29dof_wbt_force_observation,
+    "g1_29dof_wbt_force_v2": g1_29dof_wbt_force_v2_observation,
+    "g1_29dof_wbt_force_v2_fullbase": g1_29dof_wbt_force_v2_observation,
 }

@@ -245,11 +245,68 @@ g1_29dof_wbt_force = replace(
 )
 
 
+########################################################################################################################
+# WBT wrist-force experiment (v14 / force_v2)
+########################################################################################################################
+# Built from baseline ``g1_29dof_wbt``, NOT from V10's ``g1_29dof_wbt_force``,
+# so V10 and V14 presets remain independent. The [1024, 512, 256] hidden dims
+# are written out explicitly here; V14 does not reference V10's preset at all.
+
+_baseline_algo_v14: _PPOAlgoConfig = _cast("_PPOAlgoConfig", g1_29dof_wbt.algo)
+_baseline_algo_config_v14 = _baseline_algo_v14.config
+
+g1_29dof_wbt_force_v2 = replace(
+    g1_29dof_wbt,
+    env_class="holosoma.envs.wbt.wbt_force_injected_v2.WholeBodyTrackingForceInjectedV2",
+    training=replace(
+        g1_29dof_wbt.training,
+        name="g1_29dof_wbt_force_v2_manager",
+    ),
+    command=command.g1_29dof_wbt_force_v2_command,
+    observation=observation.g1_29dof_wbt_force_v2_observation,
+    reward=reward.g1_29dof_wbt_force_v2_reward,
+    algo=replace(
+        _baseline_algo_v14,
+        config=replace(
+            _baseline_algo_config_v14,
+            module_dict=replace(
+                _baseline_algo_config_v14.module_dict,
+                actor=replace(
+                    _baseline_algo_config_v14.module_dict.actor,
+                    layer_config=replace(
+                        _baseline_algo_config_v14.module_dict.actor.layer_config,
+                        hidden_dims=[1024, 512, 256],
+                    ),
+                ),
+                critic=replace(
+                    _baseline_algo_config_v14.module_dict.critic,
+                    layer_config=replace(
+                        _baseline_algo_config_v14.module_dict.critic.layer_config,
+                        hidden_dims=[1024, 512, 256],
+                    ),
+                ),
+            ),
+        ),
+    ),
+)
+
+g1_29dof_wbt_force_v2_fullbase = replace(
+    g1_29dof_wbt_force_v2,
+    training=replace(
+        g1_29dof_wbt_force_v2.training,
+        name="g1_29dof_wbt_force_v2_fullbase_manager",
+    ),
+    command=command.g1_29dof_wbt_force_v2_fullbase_command,
+)
+
+
 __all__ = [
     "g1_29dof_wbt",
     "g1_29dof_wbt_fast_sac",
     "g1_29dof_wbt_fast_sac_w_object",
     "g1_29dof_wbt_force",
+    "g1_29dof_wbt_force_v2",
+    "g1_29dof_wbt_force_v2_fullbase",
     "g1_29dof_wbt_w_object",
 ]
 
