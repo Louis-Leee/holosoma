@@ -123,7 +123,7 @@ unset CONDA_ENV_NAME
 source "$PROJECT_ROOT/scripts/source_isaacsim_setup.sh"
 
 if [ "$SKIP_REINSTALL" != "1" ]; then
-    HOLOSOMA_DEPS_DIR="${HOLOSOMA_DEPS_DIR:-$HOME/.holosoma_deps}"
+    HOLOSOMA_DEPS_DIR="${HOLOSOMA_DEPS_DIR:-$HOME/holosoma_deps}"
     pip install -e "$PROJECT_ROOT/src/holosoma[unitree,booster]" --quiet
     if ! python -c "import isaaclab" 2>/dev/null; then
         echo "[v14] isaaclab not found, reinstalling..."
