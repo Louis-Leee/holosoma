@@ -206,6 +206,31 @@ def test_metrics_expose_cmd_ext_anti_parallel_alignment() -> None:
         assert align.mean().item() < -0.9
 
 
+def test_cmd_ext_alignment_active_only_is_undiluted_by_inactive_envs() -> None:
+    """低 activation_prob 下,legacy ``cmd_ext_alignment`` 被 zero-filled
+    envs 稀释(steady-state ~ -p*(2-p)), 而 ``_active_only`` 变体只在真实
+    active 的 (env, wrist) 上聚合,wandb mean 仍应 ~ -1。
+    """
+    torch.manual_seed(0)
+    term = WristForceTrackingCommand(
+        _cfg(force_ext_activation_prob_per_step=0.05),
+        _mock_env(num_envs=64),
+    )
+    term.reset(None)
+    for _ in range(30):
+        term.step()
+    term.update_metrics()
+
+    # 只有在真的采到了 active 样本时才校验 —— 否则样本池为空。
+    ao = term.metrics["force/cmd_ext_alignment_active_only"]
+    assert ao.ndim == 1, "active_only metric must be 1D (flattened active pairs)"
+    if ao.numel() > 0:
+        assert ao.mean().item() < -0.99, (
+            f"active_only 应 approx -1,实际 {ao.mean().item():.4f} "
+            f"(n_active={ao.numel()})"
+        )
+
+
 def test_force_cmd_b_is_cached_snapshot_not_recomputed_property() -> None:
     """F_cmd_b 必须是 step() 里缓存的快照,多次访问返回同一对象(不随 base_quat 变化)。
 

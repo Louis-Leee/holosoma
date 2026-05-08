@@ -27,6 +27,7 @@ EXPECTED_COMMAND_METRIC_KEYS = {
     "force/cmd_magnitude_r",
     "force/cmd_magnitude_max",
     "force/cmd_ext_alignment",
+    "force/cmd_ext_alignment_active_only",
     "force/active_frac_ext",
     "force/phase_ramp_up",
     "force/phase_hold",

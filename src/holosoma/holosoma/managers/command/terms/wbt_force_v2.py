@@ -424,9 +424,27 @@ class WristForceTrackingCommand(CommandTermBase):
         ext_safe = ext_mag.clamp(min=1e-6)
         cos_per_wrist = (f_cmd_w * f_ext).sum(dim=-1) / (cmd_w_safe * ext_safe)
         both_active = (cmd_mag > 1e-3) & (ext_mag > 1e-3)
-        cos_per_wrist = torch.where(both_active, cos_per_wrist, torch.zeros_like(cos_per_wrist))
+        # Legacy per-env aggregation (zero-filled for inactive wrists, mean over
+        # num_wrists). Kept for continuity; at the wandb level this mean is
+        # diluted by envs with no active wrist — steady-state value is ~
+        # -p*(2-p) where p = active_frac_ext, not -1. Use
+        # ``force/cmd_ext_alignment_active_only`` for the undiluted read.
+        cos_per_wrist_zeroed = torch.where(
+            both_active, cos_per_wrist, torch.zeros_like(cos_per_wrist)
+        )
         denom = both_active.float().sum(dim=-1).clamp(min=1.0)
-        metrics["force/cmd_ext_alignment"] = (cos_per_wrist.sum(dim=-1) / denom).float()
+        metrics["force/cmd_ext_alignment"] = (
+            cos_per_wrist_zeroed.sum(dim=-1) / denom
+        ).float()
+
+        # Active-only variant: flatten to only the (env, wrist) pairs that are
+        # currently active. Variable-length 1D tensor (possibly empty). The
+        # wandb-side TensorAverageMeter cats all steps and means over the real
+        # active sample pool, so this tracks the true physical anti-parallel
+        # contract (~ -1 for both yaw_only and full_base frames).
+        metrics["force/cmd_ext_alignment_active_only"] = (
+            cos_per_wrist[both_active].float().detach()
+        )
 
         ext_active = (self._ext_channel.state != STATE_COOLDOWN).float()
         metrics["force/active_frac_ext"] = ext_active.mean(dim=-1)
