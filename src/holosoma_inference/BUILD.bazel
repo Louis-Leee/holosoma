@@ -1,0 +1,89 @@
+# holosoma_inference — policy runtime (WBT, locomotion) + Unitree/Booster
+# SDK glue code.
+#
+# Under `pi setup retargeting` this is installed via `pip install -e` into
+# the hsretargeting conda env. Under bazel it's exposed as a py_library so
+# the holosoma_driver child can import and run WholeBodyTrackingPolicy
+# in-process.
+#
+# Entry-point metadata:
+#   holosoma_inference.sdk.__init__ calls importlib.metadata.entry_points(
+#       group="holosoma.sdk") to discover SDK backends. The same pattern
+#   appears in config_values/robot.py, config_values/inference.py, etc.
+#   importlib.metadata scans sys.path for ``*.dist-info`` / ``*.egg-info``
+#   directories. The source tree already contains
+#   holosoma_inference.egg-info/ alongside the package, so shipping that
+#   tree as `data` lets importlib pick up the entry points without a
+#   rebuild step.
+
+load("@aspect_rules_py//py:defs.bzl", "py_library", "py_test")
+
+package(default_visibility = ["//visibility:public"])
+
+py_library(
+    name = "holosoma_inference",
+    srcs = glob(
+        ["holosoma_inference/**/*.py"],
+        exclude = ["holosoma_inference/**/tests/**"],
+    ),
+    data = glob(
+        [
+            # Ship the package's yaml/onnx assets + the egg-info metadata so
+            # importlib.metadata entry-point lookup works at runtime.
+            "holosoma_inference/**/*.yaml",
+            "holosoma_inference/**/*.onnx",
+            "holosoma_inference/py.typed",
+            "holosoma_inference.egg-info/PKG-INFO",
+            "holosoma_inference.egg-info/entry_points.txt",
+            "holosoma_inference.egg-info/top_level.txt",
+            "holosoma_inference.egg-info/dependency_links.txt",
+            "holosoma_inference.egg-info/SOURCES.txt",
+            "holosoma_inference.egg-info/requires.txt",
+        ],
+        allow_empty = True,
+    ),
+    imports = ["."],
+    deps = [
+        "@far_pi_pip_deps//defusedxml",
+        "@far_pi_pip_deps//eval_type_backport",
+        # evdev is stubbed via override_requirement in MODULE.bazel. Only
+        # the Booster SDK uses it and its sdist doesn't build cleanly under
+        # the hermetic venv's setuptools.
+        "@far_pi_pip_deps//evdev",
+        # holosoma_inference/compat.py branches on py>=3.12 to use stdlib
+        # importlib.metadata; bazel python is 3.11 → the backport.
+        "@far_pi_pip_deps//importlib_metadata",
+        "@far_pi_pip_deps//loguru",
+        # mujoco enables the new sdk/mujoco/ virtual-robot backend. Pulled
+        # in unconditionally so the registry fallback in sdk/__init__.py
+        # can import MujocoInterface without a secondary install step.
+        "@far_pi_pip_deps//mujoco",
+        "@far_pi_pip_deps//netifaces",
+        "@far_pi_pip_deps//numpy",
+        "@far_pi_pip_deps//onnx",
+        "@far_pi_pip_deps//onnxruntime",
+        "@far_pi_pip_deps//pydantic",
+        "@far_pi_pip_deps//pyzmq",
+        "@far_pi_pip_deps//scipy",
+        "@far_pi_pip_deps//sshkeyboard",
+        "@far_pi_pip_deps//termcolor",
+        "@far_pi_pip_deps//tyro",
+        "@far_pi_pip_deps//typing_extensions",
+        "@far_pi_pip_deps//wandb",
+        # pinocchio comes from nix (the pip `pin` is stubbed — see
+        # MODULE.bazel _CMEEL_STUBS). py_pinocchio also exposes eigenpy / coal
+        # / casadi, which WBT's MotionClockUtil pulls in transitively.
+        "@nix_pinocchio//:py_pinocchio",
+        # C++ pybind11 binding for the Unitree SDK — must be in the same
+        # process as the policy. The wheel bundles CycloneDDS 0.10.2; see
+        # rfmpi/third_party/unitree_interface_binary for isolation notes.
+        "@unitree_interface_binary//:unitree_interface_binary",
+    ],
+)
+
+# SDK-backend tests (dampening, send-log, registry, mujoco_interface,
+# policy_output_bounds) used to live in holosoma_inference/sdk/tests/.
+# They moved out of core when service-mode was collapsed; the FAR-pi-
+# side equivalents now live under
+# //holosoma_extensions/src/extensions/holosoma_driver/ and
+# //holosoma_extensions/src/extensions/holosoma_service/.

@@ -1,0 +1,48 @@
+# holosoma_retargeting — SMPL → G1 retargeting via mink differential IK.
+#
+# Source layout (setuptools, pip-editable outside bazel):
+#   holosoma_retargeting/{src,config_values,...}/*.py
+#   holosoma_retargeting/models/**                 — URDFs + MuJoCo XMLs
+#
+# Under `pi setup retargeting` this package is installed via `pip install -e`
+# into the hsretargeting conda env. Under bazel it's exposed as a py_library
+# so the holosoma_driver child can import it without that env.
+
+load("@aspect_rules_py//py:defs.bzl", "py_library")
+
+package(default_visibility = ["//visibility:public"])
+
+py_library(
+    name = "holosoma_retargeting",
+    srcs = glob(["holosoma_retargeting/**/*.py"]),
+    data = glob(
+        [
+            # SMPLRetargeter defaults to the shipped G1 29-DOF MuJoCo XML when
+            # robot_urdf_path is absent — keep the whole models/ tree reachable.
+            "holosoma_retargeting/models/**/*.xml",
+            "holosoma_retargeting/models/**/*.urdf",
+            "holosoma_retargeting/models/**/*.stl",
+            "holosoma_retargeting/models/**/*.obj",
+            "holosoma_retargeting/models/**/*.mtl",
+            "holosoma_retargeting/models/**/*.jinja",
+        ],
+        allow_empty = True,
+    ),
+    imports = ["."],
+    # Deps mirror pyproject.toml's `dependencies`, restricted to what the
+    # service-mode path actually touches (retargeter + utils). Viser/smplx/
+    # tyro/cvxpy/libigl/trimesh/matplotlib are only used by offline tools
+    # (interaction_mesh_retargeter, demo scripts, viser_player) — those
+    # modules live in the same package but aren't imported by the
+    # driver child's realtime_smpl_retargeter path.
+    deps = [
+        "@far_pi_pip_deps//mink",
+        "@far_pi_pip_deps//mujoco",
+        "@far_pi_pip_deps//numpy",
+        "@far_pi_pip_deps//scipy",
+        "@far_pi_pip_deps//torch",
+        # tyro is touched at module-import time by config_values/robot.py +
+        # data_type.py even though the realtime path doesn't use the CLIs.
+        "@far_pi_pip_deps//tyro",
+    ],
+)

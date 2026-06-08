@@ -1,0 +1,112 @@
+# holosoma — core training package (agents, envs, managers, config_*).
+#
+# This is the top-level `holosoma` python package that the training-side
+# extensions (quadruped, bxi, humanoid_training) all import from. It does
+# NOT include the inference or retargeting packages — those are peers in
+# src/holosoma_inference and src/holosoma_retargeting and have their own
+# BUILD files.
+#
+# Exclusions (see `blocked_srcs` below):
+#  - simulator/isaacgym/**  — isaacgym not exposed as a bazel repo (only
+#    @isaaclab is). Removing leaves the IsaacGym simulator path unusable
+#    from bazel — fine for extension builds since none of the five
+#    hooked extensions (quadruped, quadruped_inference, bxi,
+#    bxi_inference, humanoid_training) invoke the IsaacGym path.
+#  - simulator/isaacsim/**  — imports carb/omni/pxr/isaacsim/isaaclab.
+#    These sit behind the isaacsim/all extras which are x86_64-only
+#    even in @far_pi_pip_deps. The IsaacSim simulator path is driven
+#    through holosoma.config_values.simulator._target_ string lookups
+#    so excluding the module body still leaves the top-level package
+#    importable.
+#  - simulator/mujoco/backends/warp_bridge.py, warp_randomization.py,
+#    utils/warp_utils.py  — optional warp-lang GPU path; the classic
+#    mujoco backend is the only one all five target extensions touch.
+#  - utils/adapters/isaacgym_draw_adapter.py,
+#    utils/adapters/isaacsim_draw_adapter.py  — debug draw helpers
+#    imported only inside an `if simulator_type == ISAACSIM/GYM:` block
+#    in utils/draw.py, so removing them doesn't affect module load.
+#  - bridge/booster/booster_sdk2py_bridge.py  — hard-imports
+#    booster_robotics_sdk (not on pypi under that name). bridge/__init__
+#    uses entry_points for dispatch so the missing submodule is only
+#    fatal if someone actually selects the booster SDK.
+#  - bridge/ros2/**  — ros2_bridge.py hard-imports `far_msgs` which
+#    does not exist in this tree. Keep the rest of bridge/ intact so
+#    holosoma.bridge.base remains importable (both bxi and
+#    humanoid_training use BasicSdk2Bridge from there).
+
+load("@aspect_rules_py//py:defs.bzl", "py_library")
+
+package(default_visibility = ["//visibility:public"])
+
+_BLOCKED_SRCS = [
+    "holosoma/simulator/isaacgym/**",
+    "holosoma/simulator/isaacsim/**",
+    "holosoma/simulator/mujoco/backends/warp_bridge.py",
+    "holosoma/simulator/mujoco/backends/warp_randomization.py",
+    "holosoma/utils/warp_utils.py",
+    "holosoma/utils/adapters/isaacgym_draw_adapter.py",
+    "holosoma/utils/adapters/isaacsim_draw_adapter.py",
+    "holosoma/bridge/booster/booster_sdk2py_bridge.py",
+    "holosoma/bridge/ros2/**",
+]
+
+py_library(
+    name = "holosoma",
+    srcs = glob(
+        ["holosoma/**/*.py"],
+        exclude = _BLOCKED_SRCS,
+    ),
+    data = glob(
+        [
+            # managers/terrain and simulator/shared carry JSON/YAML/NPY
+            # config assets referenced via importlib.resources.
+            "holosoma/**/*.yaml",
+            "holosoma/**/*.json",
+            "holosoma/**/*.npy",
+            "holosoma/**/*.npz",
+            "holosoma/**/*.xml",
+            "holosoma/**/*.urdf",
+            "holosoma/py.typed",
+        ],
+        allow_empty = True,
+    ),
+    imports = ["."],
+    deps = [
+        # Build/runtime pip deps — aligned with pyproject.toml's
+        # `dependencies`, minus entries that are unused on the non-sim
+        # code paths retained above.
+        #
+        # Deps trimmed vs upstream holosoma/pyproject.toml:
+        #  * astor, easydict, meshcat, numpy-stl, open3d, plotly,
+        #    shapely, yourdfpy — not imported anywhere in the bazel-
+        #    visible subset; bringing them in pulls ~30 transitive
+        #    wheels (especially open3d) for zero runtime benefit.
+        #    Upstream leaves them declared for non-bazel pip installs.
+        #  * notebook/ipdb/mypy/lxml-stubs — debug tooling.
+        "@far_pi_pip_deps//glfw",
+        "@far_pi_pip_deps//loguru",
+        "@far_pi_pip_deps//mujoco",
+        "@far_pi_pip_deps//numpy",
+        "@far_pi_pip_deps//omegaconf",
+        "@far_pi_pip_deps//onnx",
+        # opencv-python-headless is the variant pinned in
+        # bazel_pip_deps; holosoma core imports `cv2` which both
+        # wheels ship as the same module.
+        "@far_pi_pip_deps//opencv_python_headless",
+        "@far_pi_pip_deps//pydantic",
+        "@far_pi_pip_deps//pygame",
+        # pynput is try/except-guarded in utils/sim_utils.py (headless
+        # environments expectedly don't have it). Still declared so the
+        # keyboard-driven non-headless path works under bazel.
+        "@far_pi_pip_deps//pynput",
+        "@far_pi_pip_deps//pyzmq",
+        "@far_pi_pip_deps//rich",
+        "@far_pi_pip_deps//scipy",
+        "@far_pi_pip_deps//tensordict",
+        "@far_pi_pip_deps//torch",
+        "@far_pi_pip_deps//tqdm",
+        "@far_pi_pip_deps//trimesh",
+        "@far_pi_pip_deps//tyro",
+        "@far_pi_pip_deps//wandb",
+    ],
+)
