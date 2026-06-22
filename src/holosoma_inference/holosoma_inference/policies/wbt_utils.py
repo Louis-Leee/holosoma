@@ -90,8 +90,13 @@ class TimestepUtil:
 
 class PinocchioRobot:
     def __init__(self, robot_cfg: RobotConfig, urdf_text: str):
-        # create pinocchio robot
-        xml_text = self._create_xml_from_urdf(urdf_text)
+        # create pinocchio robot. Prune any movable joint NOT in the policy's
+        # dof_names (e.g. the yam gripper's 4 prismatic finger jaws, which ride
+        # along unactuated and are absent from the 29-DOF dof_names) so the model
+        # contains exactly the actuated joints — otherwise buildModelFromXML
+        # builds the extra DOF as movable joints and the joint-count assert below
+        # fires. No-op for URDFs whose movable joints == dof_names (rubber hand).
+        xml_text = self._create_xml_from_urdf(urdf_text, keep_joint_names=robot_cfg.dof_names)
         self.robot_model = pin.buildModelFromXML(xml_text, pin.JointModelFreeFlyer())
         self.robot_data = self.robot_model.createData()
 
@@ -119,18 +124,66 @@ class PinocchioRobot:
         return np.expand_dims(quaternion.coeffs(), axis=0)  # xyzw, (1, 4)
 
     @staticmethod
-    def _create_xml_from_urdf(urdf_text: str) -> str:
-        """Strip visuals/collisions from URDF text and return XML text."""
+    def _create_xml_from_urdf(urdf_text: str, keep_joint_names: list[str] | None = None) -> str:
+        """Strip visuals/collisions from URDF text and return XML text.
+
+        If ``keep_joint_names`` is given, also prune every MOVABLE joint whose
+        name is not in that list, together with its child-link subtree. This
+        keeps the Pinocchio model at exactly the actuated DOF for assets that
+        carry extra unactuated joints (e.g. the yam gripper's 4 prismatic finger
+        jaws, which are absent from the 29-name dof_names). Fixed joints are
+        always kept — Pinocchio absorbs them and they may anchor tracked frames
+        (foot/ref bodies). No-op when every movable joint is already kept.
+        """
         root = ElementTree.fromstring(urdf_text)
 
-        def _is_visual_or_collision(tag: str) -> bool:
+        def _localname(tag: str) -> str:
             # Handle optional XML namespaces by only checking the suffix after '}'.
-            return tag.rsplit("}", maxsplit=1)[-1] in {"visual", "collision"}
+            return tag.rsplit("}", maxsplit=1)[-1]
 
         for parent in root.iter():
             for child in list(parent):
-                if _is_visual_or_collision(child.tag):
+                if _localname(child.tag) in {"visual", "collision"}:
                     parent.remove(child)
+
+        if keep_joint_names is not None:
+            keep = set(keep_joint_names)
+            _movable = {"revolute", "continuous", "prismatic", "floating", "planar"}
+            joints = [c for c in root if _localname(c.tag) == "joint"]
+            # link_name -> child <joint> elements (for subtree walking).
+            children_of: dict[str, list] = {}
+            for j in joints:
+                p = j.find("parent")
+                if p is not None and p.get("link"):
+                    children_of.setdefault(p.get("link"), []).append(j)
+
+            joints_to_drop: set = set()
+            links_to_drop: set[str] = set()
+            # Seed with movable joints that are not in the keep set.
+            stack = [
+                j for j in joints
+                if _localname(j.tag) == "joint"
+                and j.get("type") in _movable
+                and j.get("name") not in keep
+            ]
+            while stack:
+                j = stack.pop()
+                if id(j) in joints_to_drop:
+                    continue
+                joints_to_drop.add(id(j))
+                child_el = j.find("child")
+                child_link = child_el.get("link") if child_el is not None else None
+                if child_link and child_link not in links_to_drop:
+                    links_to_drop.add(child_link)
+                    # Recurse: any joint mounted on the dropped link goes too.
+                    stack.extend(children_of.get(child_link, []))
+
+            for el in list(root):
+                lname = _localname(el.tag)
+                if lname == "joint" and id(el) in joints_to_drop:
+                    root.remove(el)
+                elif lname == "link" and el.get("name") in links_to_drop:
+                    root.remove(el)
 
         xml_text = ElementTree.tostring(root, encoding="unicode")
         if not xml_text.lstrip().startswith("<?xml"):

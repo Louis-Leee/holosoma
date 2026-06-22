@@ -6,7 +6,9 @@ Tests focus on timing logic for MotionClockUtil and TimestepUtil classes.
 
 from unittest import mock
 
-from holosoma_inference.policies.wbt_utils import MotionClockUtil, TimestepUtil
+from defusedxml import ElementTree
+
+from holosoma_inference.policies.wbt_utils import MotionClockUtil, PinocchioRobot, TimestepUtil
 
 
 class TestMotionClockUtil:
@@ -248,3 +250,74 @@ class TestTimestepUtil:
         assert timestep_util.get_timestep() == 0  # 33/33.33 = 0 (floor)
         assert timestep_util.get_timestep() == 1  # 66/33.33 = 1 (floor)
         assert timestep_util.get_timestep() == 3  # 100/33.33 = 3 (floor)
+
+
+class TestCreateXmlFromUrdfJointPruning:
+    """`_create_xml_from_urdf` must prune movable joints absent from dof_names
+    (e.g. the yam gripper's prismatic finger jaws) plus their child-link subtree,
+    so Pinocchio sees exactly the actuated DOF. The yam URDF embeds 33 movable
+    joints into ONNX `robot_urdf` metadata; without pruning the njoints==29 assert
+    in PinocchioRobot.__init__ fires for every yam checkpoint at eval/deploy."""
+
+    # A minimal URDF: 2 revolute "arm" joints + 1 prismatic "jaw" (mimic-like
+    # extra DOF) hanging off the last link, plus a fixed sensor joint that MUST
+    # be kept (Pinocchio absorbs fixed joints; they anchor tracked frames).
+    _URDF = """<?xml version="1.0"?>
+<robot name="t">
+  <link name="base"/>
+  <link name="l1"/>
+  <link name="l2"/>
+  <link name="sensor"/>
+  <link name="jaw"/>
+  <joint name="j1" type="revolute"><parent link="base"/><child link="l1"/>
+    <visual><geometry><box size="1 1 1"/></geometry></visual></joint>
+  <joint name="j2" type="revolute"><parent link="l1"/><child link="l2"/></joint>
+  <joint name="ft_fixed" type="fixed"><parent link="l2"/><child link="sensor"/></joint>
+  <joint name="jaw_joint" type="prismatic"><parent link="sensor"/><child link="jaw"/></joint>
+</robot>"""
+
+    @staticmethod
+    def _names(root, kind):
+        return {
+            e.get("name")
+            for e in root
+            if e.tag.rsplit("}", 1)[-1] == kind
+        }
+
+    def test_prunes_movable_joint_not_in_keep_and_its_link(self):
+        out = PinocchioRobot._create_xml_from_urdf(self._URDF, keep_joint_names=["j1", "j2"])
+        root = ElementTree.fromstring(out)
+        joints = self._names(root, "joint")
+        links = self._names(root, "link")
+        # Movable jaw_joint dropped; its child link "jaw" dropped.
+        assert "jaw_joint" not in joints
+        assert "jaw" not in links
+        # Kept joints + the fixed sensor joint survive.
+        assert {"j1", "j2", "ft_fixed"} <= joints
+        assert {"base", "l1", "l2", "sensor"} <= links
+
+    def test_fixed_joints_always_kept(self):
+        """A fixed joint is kept even when not in keep_joint_names (Pinocchio
+        absorbs it; it may anchor a tracked foot/ref frame)."""
+        out = PinocchioRobot._create_xml_from_urdf(self._URDF, keep_joint_names=["j1", "j2"])
+        assert "ft_fixed" in self._names(ElementTree.fromstring(out), "joint")
+
+    def test_noop_when_all_movable_kept(self):
+        """When every movable joint is in keep_joint_names (rubber/pika case),
+        no joints/links are pruned — only visuals/collisions are stripped."""
+        keep = ["j1", "j2", "jaw_joint"]
+        out = PinocchioRobot._create_xml_from_urdf(self._URDF, keep_joint_names=keep)
+        root = ElementTree.fromstring(out)
+        assert self._names(root, "joint") == {"j1", "j2", "ft_fixed", "jaw_joint"}
+        assert self._names(root, "link") == {"base", "l1", "l2", "sensor", "jaw"}
+
+    def test_none_keep_strips_only_visuals(self):
+        """keep_joint_names=None preserves the legacy behavior: strip
+        visual/collision, keep all joints/links."""
+        out = PinocchioRobot._create_xml_from_urdf(self._URDF, keep_joint_names=None)
+        root = ElementTree.fromstring(out)
+        assert self._names(root, "joint") == {"j1", "j2", "ft_fixed", "jaw_joint"}
+        # Visual under j1 was stripped.
+        for j in root:
+            if j.get("name") == "j1":
+                assert j.find("visual") is None
