@@ -99,6 +99,15 @@ class MotionConfig:
     """Directory (or comma-separated directories) of .npz motion files.
     When non-empty, takes precedence over motion_file."""
 
+    motion_file_list: str = ""
+    """Optional path to a text file listing the .npz *basenames* (one per line)
+    to keep when loading from ``motion_dir``. Blank lines and lines starting
+    with ``#`` are ignored. When non-empty, only files in ``motion_dir`` whose
+    basename appears in this list are loaded — every other glob hit is skipped.
+    A basename in the list that is absent from ``motion_dir`` is silently
+    ignored (the list may be a superset). Has no effect unless ``motion_dir``
+    is set."""
+
     # motion sampling related
     use_adaptive_timesteps_sampler: bool = False
     """During training, whether to prioritize training on motion segments where the robot fails often."""

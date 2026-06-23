@@ -243,6 +243,7 @@ class MultiMotionLoader:
         robot_body_names: list[str],
         robot_joint_names: list[str],
         device: str = "cpu",
+        allowed_basenames: set[str] | None = None,
     ):
         # Support comma-separated directories for combining multiple datasets
         dirs = [d.strip() for d in motion_dir.split(",")]
@@ -250,9 +251,20 @@ class MultiMotionLoader:
         for d in dirs:
             expanded = os.path.expanduser(d)
             files = sorted(str(p) for p in Path(expanded).glob("*.npz"))
-            logger.info(f"MultiMotionLoader: found {len(files)} .npz files in {expanded}")
+            if allowed_basenames is not None:
+                kept = [f for f in files if os.path.basename(f) in allowed_basenames]
+                logger.info(
+                    f"MultiMotionLoader: found {len(files)} .npz files in {expanded}, "
+                    f"kept {len(kept)} after motion_file_list filter"
+                )
+                files = kept
+            else:
+                logger.info(f"MultiMotionLoader: found {len(files)} .npz files in {expanded}")
             motion_files.extend(files)
-        assert len(motion_files) > 0, f"No .npz files found in {motion_dir}"
+        assert len(motion_files) > 0, (
+            f"No .npz files found in {motion_dir}"
+            + ("" if allowed_basenames is None else " matching the motion_file_list filter")
+        )
         logger.info(f"MultiMotionLoader: loading {len(motion_files)} total motion files")
 
         loaders = []
@@ -521,6 +533,29 @@ class MotionCommand(CommandTermBase):
             self.motion_cfg = MotionConfig(**cfg.params["motion_config"])
         self.init_pose_cfg: NoiseToInitialPoseConfig = self.motion_cfg.noise_to_initial_pose
 
+    @staticmethod
+    def _load_motion_file_list(motion_file_list: str) -> set[str] | None:
+        """Parse a motion_file_list text file into a set of .npz basenames.
+
+        Returns None when no list is configured (loader keeps every glob hit).
+        Blank lines and ``#`` comments are ignored; each kept entry is reduced
+        to its basename so the list may store either bare names or full paths.
+        """
+        if not motion_file_list:
+            return None
+        path = os.path.expanduser(motion_file_list)
+        assert os.path.isfile(path), f"motion_file_list not found: {path}"
+        names: set[str] = set()
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                names.add(os.path.basename(line))
+        assert names, f"motion_file_list is empty (no usable entries): {path}"
+        logger.info(f"motion_file_list: {len(names)} basenames from {path}")
+        return names
+
     def setup(self) -> None:
         self.num_envs = self._env.num_envs
         self.device = self._env.device
@@ -536,11 +571,13 @@ class MotionCommand(CommandTermBase):
         )
         self.motion: MotionLoader | MultiMotionLoader
         if self.motion_cfg.motion_dir:
+            allowed_basenames = self._load_motion_file_list(self.motion_cfg.motion_file_list)
             self.motion = MultiMotionLoader(
                 self.motion_cfg.motion_dir,
                 robot_body_names_alias,
                 robot_joint_names,
                 device=self.device,
+                allowed_basenames=allowed_basenames,
             )
         else:
             self.motion = MotionLoader(
