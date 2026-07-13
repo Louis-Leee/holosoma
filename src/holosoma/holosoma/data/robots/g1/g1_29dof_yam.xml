@@ -332,9 +332,13 @@ Changed group of some visual geoms to support ray-tracing that passes through ro
                                                     <joint name="left_wrist_yaw_joint" class="wrist_yaw"/>
                                                     <geom class="visual" mesh="left_wrist_yaw_link"/>
                                                     <geom pos="0.072 0 0" quat="0.70710678 0 0 0.70710678" class="visual" mesh="FT_sensor"/>
-                                                    <geom pos="0.0084 -0.0433995 -0.014" quat="0.70710678 0 -0.70710678 0" class="visual" mesh="yam_gripper_base"/>
-                                                    <geom pos="0.00627686 -0.04339954 -0.01390577" quat="0.70710678 0 -0.70710678 0" class="visual" mesh="yam_gripper_tip_left"/>
-                                                    <geom pos="0.00627691 -0.04339998 -0.01409510" quat="0.70710678 0 -0.70710678 0" class="visual" mesh="yam_gripper_tip_right"/>
+                                                    <!-- Gripper geoms shifted +0.027 m along wrist +x (0.0084->0.0354, 0.00627->0.03327)
+                                                         to track the URDF palm-joint standoff bump 0.0295->0.0565 (g1_29dof_yam.urdf),
+                                                         so the rendered gripper matches the URDF grasp point (wrist +x 0.1931 m).
+                                                         FT puck + palm site are on the FT sensor (unchanged by the standoff). -->
+                                                    <geom pos="0.0354 -0.0433995 -0.014" quat="0.70710678 0 -0.70710678 0" class="visual" mesh="yam_gripper_base"/>
+                                                    <geom pos="0.03327686 -0.04339954 -0.01390577" quat="0.70710678 0 -0.70710678 0" class="visual" mesh="yam_gripper_tip_left"/>
+                                                    <geom pos="0.03327691 -0.04339998 -0.01409510" quat="0.70710678 0 -0.70710678 0" class="visual" mesh="yam_gripper_tip_right"/>
                                                     <site name="left_palm" pos="0.08 0 0" size="0.01"/>
                                                     <geom name="left_hand_collision" class="collision" type="capsule" size="0.05" fromto="0.05 0 0 0.1 0 0"/>
                                                 </body>
@@ -393,9 +397,13 @@ Changed group of some visual geoms to support ray-tracing that passes through ro
                                                     <joint name="right_wrist_yaw_joint" class="wrist_yaw"/>
                                                     <geom class="visual" mesh="right_wrist_yaw_link"/>
                                                     <geom pos="0.072 0 0" quat="0.70710678 0 0 0.70710678" class="visual" mesh="FT_sensor"/>
-                                                    <geom pos="0.0084 -0.0493995 -0.014" quat="0.70710678 0 -0.70710678 0" class="visual" mesh="yam_gripper_base"/>
-                                                    <geom pos="0.00627686 -0.04939954 -0.01390577" quat="0.70710678 0 -0.70710678 0" class="visual" mesh="yam_gripper_tip_left"/>
-                                                    <geom pos="0.00627691 -0.04939998 -0.01409510" quat="0.70710678 0 -0.70710678 0" class="visual" mesh="yam_gripper_tip_right"/>
+                                                    <!-- Gripper geoms shifted +0.027 m along wrist +x (0.0084->0.0354, 0.00627->0.03327)
+                                                         to track the URDF palm-joint standoff bump 0.0295->0.0565 (g1_29dof_yam.urdf),
+                                                         so the rendered gripper matches the URDF grasp point (wrist +x 0.1931 m).
+                                                         FT puck + palm site are on the FT sensor (unchanged by the standoff). -->
+                                                    <geom pos="0.0354 -0.0493995 -0.014" quat="0.70710678 0 -0.70710678 0" class="visual" mesh="yam_gripper_base"/>
+                                                    <geom pos="0.03327686 -0.04939954 -0.01390577" quat="0.70710678 0 -0.70710678 0" class="visual" mesh="yam_gripper_tip_left"/>
+                                                    <geom pos="0.03327691 -0.04939998 -0.01409510" quat="0.70710678 0 -0.70710678 0" class="visual" mesh="yam_gripper_tip_right"/>
                                                     <site name="right_palm" pos="0.08 0 0" size="0.01"/>
                                                     <geom name="right_hand_collision" class="collision" type="capsule" size="0.05" fromto="0.05 0 0 0.1 0 0"/>
                                                 </body>
