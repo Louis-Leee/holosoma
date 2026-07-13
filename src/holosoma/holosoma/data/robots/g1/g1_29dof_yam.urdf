@@ -900,15 +900,16 @@
             </geometry>
         </collision>
     </link>
-    <!-- Gripper re-parented onto the FT sensor link. FT link now at wrist +x 0.082
-         (moved +1 cm out); the palm origin adds +2 cm of gripper-vs-sensor standoff
-         so the gripper base sits at wrist +x 0.1115 (= 0.082 + 0.0295). The FT link
-         frame is rotated (see the sensor comment above), so this joint carries the
-         inverse rotation rpy="0 -pi/2 pi" and the rotated offset (0 -0.003 0.0295,
-         = R^T*(0.0295 0.003 0)); local z maps to wrist +x, so the +2 cm standoff lives
+    <!-- Gripper re-parented onto the FT sensor link. FT link at wrist +x 0.082; the
+         palm origin adds a 0.0565 m gripper-vs-sensor standoff so the gripper base sits
+         at wrist +x 0.1385 (= 0.082 + 0.0565) and grasp/TCP fingertips reach ~0.242 m
+         forward of wrist_yaw, i.e. FT sensor -> TCP = 0.16 m. The FT link frame is
+         rotated (see the sensor comment above), so this joint carries the inverse
+         rotation rpy="0 -pi/2 pi" and the rotated offset (0 -0.003 0.0565,
+         = R^T*(0.0565 0.003 0)); local z maps to wrist +x, so the standoff lives
          on the z component. -->
     <joint name="left_hand_palm_joint" type="fixed">
-        <origin xyz="0 -0.003 0.0295" rpy="0 -1.570796327 3.141592654"/>
+        <origin xyz="0 -0.003 0.0565" rpy="0 -1.570796327 3.141592654"/>
         <parent link="left_ft_sensor_link"/>
         <child link="left_rubber_hand"/>
     </joint>
@@ -1236,12 +1237,12 @@
          Grasp/TCP tracks the gripper -> tcp_extrinsic 0.20->0.27->0.24->0.21 m
          to stay consistent (see robot_assets/calibration/). -->
     <!-- FT link frame rotated (see sensor comment); this joint carries the inverse
-         rotation rpy="0 -pi/2 pi" and the rotated offset (0 0.003 0.0295,
-         = R^T*(0.0295 -0.003 0)). FT link moved +1 cm out (wrist +x 0.082) and this
-         adds +2 cm gripper-vs-sensor standoff on local z (= wrist +x), so the gripper
-         base sits at wrist +x 0.1115. -->
+         rotation rpy="0 -pi/2 pi" and the rotated offset (0 0.003 0.0565,
+         = R^T*(0.0565 -0.003 0)). FT link at wrist +x 0.082 and this adds a 0.0565 m
+         gripper-vs-sensor standoff on local z (= wrist +x), so the gripper base sits
+         at wrist +x 0.1385 and grasp/TCP reaches ~0.242 m (FT sensor -> TCP = 0.16 m). -->
     <joint name="right_hand_palm_joint" type="fixed">
-        <origin xyz="0 0.003 0.0295" rpy="0 -1.570796327 3.141592654"/>
+        <origin xyz="0 0.003 0.0565" rpy="0 -1.570796327 3.141592654"/>
         <parent link="right_ft_sensor_link"/>
         <child link="right_rubber_hand"/>
     </joint>
